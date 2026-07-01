@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: evalio_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evalio
+      POSTGRES_USER: evalio_user
+      POSTGRES_PASSWORD: evalio_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - evalio_pgdata:/var/lib/postgresql/data
+
+volumes:
+  evalio_pgdata:
