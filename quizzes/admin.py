@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Choice, Module, Question, Quiz, QuizQuestion
+from .models import Choice, Module, Question, Quiz, QuizQuestion, Topic, QuestionBank
 
 
 class ChoiceInline(admin.TabularInline):
@@ -7,10 +7,28 @@ class ChoiceInline(admin.TabularInline):
     extra = 2
 
 
+class QuizInline(admin.TabularInline):
+    model = Quiz
+    extra = 1
+
+
+@admin.register(Topic)
+class TopicAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_by", "created_at")
+    list_filter = ("created_by", "created_at")
+    inlines = [QuizInline]
+
+
+@admin.register(QuestionBank)
+class QuestionBankAdmin(admin.ModelAdmin):
+    list_display = ("topic", "created_at")
+    list_filter = ("created_at",)
+
+
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ("text", "module", "question_type", "created_by")
-    list_filter = ("module", "question_type")
+    list_display = ("text", "question_bank", "module", "question_type", "created_by")
+    list_filter = ("module", "question_type", "question_bank__topic")
     inlines = [ChoiceInline]
 
 
@@ -27,5 +45,6 @@ class QuizQuestionInline(admin.TabularInline):
 
 @admin.register(Quiz)
 class QuizAdmin(admin.ModelAdmin):
-    list_display = ("title", "created_by", "created_at")
+    list_display = ("title", "topic", "created_by", "created_at")
+    list_filter = ("topic", "created_by", "created_at")
     inlines = [QuizQuestionInline]

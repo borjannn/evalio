@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Choice, Module, Question, Quiz, QuizQuestion
+from .models import Choice, Module, Question, Quiz, QuizQuestion, Topic, QuestionBank
 
 
 class ChoiceWriteSerializer(serializers.ModelSerializer):
@@ -28,10 +28,11 @@ class ModuleSerializer(serializers.ModelSerializer):
 
 class QuestionTeacherSerializer(serializers.ModelSerializer):
     choices = ChoiceWriteSerializer(many=True)
+    module_name = serializers.CharField(source='module.name', read_only=True)
 
     class Meta:
         model = Question
-        fields = ("id", "module", "text", "question_type", "choices", "created_by", "created_at")
+        fields = ("id", "question_bank", "module", "module_name", "text", "question_type", "choices", "created_by", "created_at")
         read_only_fields = ("created_by", "created_at")
 
     def create(self, validated_data):
@@ -65,7 +66,28 @@ class QuestionStudentSerializer(serializers.ModelSerializer):
 class QuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
-        fields = ("id", "title", "description", "created_by", "created_at")
+        fields = ("id", "topic", "title", "description", "created_by", "created_at")
+        read_only_fields = ("created_by", "created_at")
+
+
+class QuizDetailTeacherSerializer(serializers.ModelSerializer):
+    """Full quiz details for teachers with all questions and choices."""
+    questions = serializers.SerializerMethodField()
+
+    def get_questions(self, obj):
+        quiz_questions = obj.quizquestion_set.all().order_by("order")
+        return [
+            {
+                **QuestionTeacherSerializer(qq.question).data,
+                "order": qq.order,
+                "quiz_question_id": qq.id,
+            }
+            for qq in quiz_questions
+        ]
+
+    class Meta:
+        model = Quiz
+        fields = ("id", "topic", "title", "description", "questions", "created_by", "created_at")
         read_only_fields = ("created_by", "created_at")
 
 
@@ -85,3 +107,24 @@ class QuizDetailStudentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
         fields = ("id", "title", "description", "quiz_questions")
+
+
+class QuestionBankSerializer(serializers.ModelSerializer):
+    questions = QuestionTeacherSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = QuestionBank
+        fields = ("id", "topic", "questions", "created_at", "updated_at")
+        read_only_fields = ("created_at", "updated_at")
+
+
+class TopicSerializer(serializers.ModelSerializer):
+    quizzes = QuizSerializer(many=True, read_only=True)
+    question_bank = QuestionBankSerializer(read_only=True)
+
+    class Meta:
+        model = Topic
+        fields = ("id", "name", "description", "quizzes", "question_bank", "created_by", "created_at", "updated_at")
+        read_only_fields = ("created_by", "created_at", "updated_at")
+
+
