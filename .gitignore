@@ -1,6 +1,17 @@
 /.idea
 .env
 
+# Personal Claude Code instructions
+CLAUDE.local.md
+
+# Machine-local agent permission cache
+.claude/settings.local.json
+
+# Working plans — drafts handed between agents, not project documentation.
+# PROJECT_ARCHITECTURE.md is the checked-in reference.
+FRONTEND_PLAN.md
+BACKEND_PLAN.md
+
 
 .venv/
 venv/

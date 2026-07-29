@@ -1,0 +1,23 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes: unused imports, undefined names
+    "I",   # isort: import ordering
+    "B",   # bugbear: likely bugs
+    "UP",  # pyupgrade: outdated syntax
+    "DJ",  # flake8-django
+]
+ignore = [
+    "E501",  # line length is handled by the formatter, not enforced as an error
+]
+
+[tool.ruff.lint.per-file-ignores]
+"evalio/settings.py" = ["E402"]  # SIMPLE_JWT's timedelta import sits mid-file
+
+[tool.ruff.format]
+quote-style = "double"
