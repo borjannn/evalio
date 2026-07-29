@@ -1,16 +1,20 @@
 ---
 name: frontend-route
-description: Add a screen to the Evalio Next.js frontend — an App Router route under frontend/app/, its colocated CSS Module, and its data fetching through the BFF route handlers. Use when adding any page, layout, or API proxy route to the frontend.
+description: Add a screen to the Evalio Next.js frontend — an App Router route under frontend/app/, styled with Tailwind v4 per frontend/Guidelines.md, fetching through the BFF route handlers. Use when adding any page, layout, or API proxy route to the frontend.
 ---
 
 # Add an Evalio frontend route
 
-The frontend is **Next.js 16 App Router, TypeScript, CSS Modules**. It is a fresh scaffold — as of
-this writing `app/` contains only `layout.tsx`, `page.tsx`, `globals.css`, and `page.module.css` from
-`create-next-app`. There is no existing screen to copy, so this skill defines the conventions rather
-than describing established ones. If you are the first to build a given piece (the API client, the
-auth session helper, the app shell), you are setting the pattern — keep it small and match what's
-here.
+The frontend is **Next.js 16 App Router, TypeScript, Tailwind CSS v4**. It is nearly a fresh
+scaffold — `app/` contains `layout.tsx` (fonts + tokens wired), `globals.css` (the `@theme` token
+block), and `page.tsx` (a Phase 0 token smoke test, to be replaced by the role redirect). There is
+no real screen to copy yet, so this skill defines the conventions rather than describing established
+ones. If you are the first to build a given piece (the API client, the auth session helper, the app
+shell), you are setting the pattern — keep it small and match what's here.
+
+`frontend/Guidelines.md` is the **style source of truth**: colours, type scale, spacing, and a class
+string for every component pattern. `FRONTEND_BUILD_PLAN.md` records the decisions that resolve its
+internal conflicts — read §0 of that before inventing a value.
 
 `FRONTEND_PLAN.md` at the repo root is the screen-by-screen specification: which routes exist, what
 data each shows, and which control type each field uses. Read the relevant section before building.
@@ -82,14 +86,20 @@ When you build a student screen, open DevTools and search the RSC payload for `i
 frontend/
   app/
     (teacher)/teacher/quizzes/[quizId]/page.tsx      route: /teacher/quizzes/123
-                                       page.module.css
     api/                                             BFF route handlers (see §4)
+    globals.css                                      @theme tokens — the whole design system
     layout.tsx                                       root layout — required, owns <html>/<body>
+  components/ui/                                     shared primitives: Button, Card, Input, Badge
   lib/                                               server-only helpers: api client, session, types
 ```
 
-- One `X.module.css` per component, **colocated in the same folder**, imported as
-  `import styles from "./page.module.css"` and applied with `className={styles.foo}`.
+- **Tailwind utilities in `className`. No `.module.css` files.** Take class strings from
+  `Guidelines.md` §5 rather than composing your own; a one-off button that differs by a padding step
+  is the way the system erodes.
+- Repeated markup becomes a component in `components/ui/`, not a copied class string.
+- Tokens live in `app/globals.css` under `@theme`. Tailwind v4 has **no `tailwind.config.js`** —
+  adding one does nothing. A colour that isn't a token doesn't belong in a component.
+- Focus states use `focus-visible:ring-2 focus-visible:ring-ring` everywhere (Guidelines §6.2).
 - Import across folders with the `@/` alias — `tsconfig.json` maps it to the frontend root.
 - **`.tsx` for anything with JSX, `.ts` otherwise.** `strict` is on, so an untyped parameter is a
   build error, not a warning. Don't reach for `any` to silence it — if a shape is genuinely unknown
@@ -110,7 +120,6 @@ to the page.
 // app/(teacher)/teacher/topics/[topicId]/page.tsx  — Server Component, no directive
 import { apiGet } from "@/lib/api";
 import type { Topic } from "@/lib/types";
-import styles from "./page.module.css";
 
 // PageProps is a generated global — no import. The route string types `params`,
 // so `topicId` here comes from the [topicId] folder name, not from a hand-written type.
@@ -121,8 +130,8 @@ export default async function TopicPage({
   const topic = await apiGet<Topic>(`/topics/${topicId}/`);
 
   return (
-    <main className={styles.page}>
-      <h1>{topic.name}</h1>
+    <main className="mx-auto max-w-6xl space-y-8 p-4 md:p-8">
+      <h1 className="text-3xl font-semibold tracking-tight">{topic.name}</h1>
     </main>
   );
 }

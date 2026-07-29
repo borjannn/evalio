@@ -111,10 +111,28 @@ annotated queryset or pagination silently repeats and skips rows.
 
 ## Frontend conventions
 
-Next.js 16 App Router, TypeScript (`strict`), CSS Modules. See `.claude/skills/frontend-route/SKILL.md` and
-`@FRONTEND_PLAN.md`. `frontend/AGENTS.md` requires reading `node_modules/next/dist/docs/` before
-writing frontend code — this version differs from training data in ways that matter (`params` is a
-Promise, middleware is now `proxy.js`).
+Next.js 16 App Router, TypeScript (`strict`), **Tailwind CSS v4**. See
+`.claude/skills/frontend-route/SKILL.md` and `@FRONTEND_PLAN.md`. `frontend/AGENTS.md` requires
+reading `node_modules/next/dist/docs/` before writing frontend code — this version differs from
+training data in ways that matter (`params` is a Promise, middleware is now `proxy.js`).
+
+**Styling is Tailwind utilities, not CSS Modules.** This replaced CSS Modules when the design spec
+landed — `frontend/Guidelines.md` is written entirely as class strings, and it is the source of
+truth for every colour, size and component pattern. Don't add `.module.css` files.
+
+Tailwind v4 has no `tailwind.config.js`. Tokens are declared in an `@theme` block in
+`app/globals.css`, which is what generates the utilities — `--color-muted-foreground` there is what
+makes `text-muted-foreground` exist. Change a value there, never in a component.
+
+Two things in that file are deliberate and easy to "fix" wrongly:
+- **Font variables are `--font-inter` / `--font-space-mono`, not `--font-sans` / `--font-mono`.**
+  `@theme` maps the latter onto the former. Naming the `next/font` variable the same as the theme
+  variable makes the property reference itself, which is invalid at computed-value time.
+- **There is no dark mode and no `prefers-color-scheme` block.** The token set is light-only; a dark
+  block turns the page ground black while every card stays white.
+
+The page ground is `bg-neutral-50` on `<body>` with white cards, so cards separate by value rather
+than by shadow. `--color-background` (#ffffff) is the card surface, not the page.
 
 **Pin TypeScript to `^6`.** Next 16's built-in type checker cannot use TS 7 — `next build` exits and
 tells you to enable `experimental.useTypeScriptCli` — and `@typescript-eslint` peer-requires

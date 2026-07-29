@@ -11,6 +11,16 @@ CLAUDE.local.md
 # PROJECT_ARCHITECTURE.md is the checked-in reference.
 FRONTEND_PLAN.md
 BACKEND_PLAN.md
+FRONTEND_BUILD_PLAN.md
+
+# Figma Make reference export — design reference, not project code.
+# Contains committed .next/ build output and webpack cache blobs.
+figma_frontend_example/
+
+# Style spec, kept local alongside the reference export it describes.
+# NOTE: CLAUDE.md and the frontend-route skill both cite this as the style
+# source of truth, so a fresh clone won't have the file they point at.
+frontend/Guidelines.md
 
 
 .venv/
