@@ -11,6 +11,15 @@ services:
       - "5432:5432"
     volumes:
       - evalio_pgdata:/var/lib/postgresql/data
+    # Lets `docker compose up -d db --wait` block until Postgres actually accepts
+    # connections. Without it the container is "running" several seconds before
+    # it can serve a query, and `manage.py migrate` races it.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
 volumes:
   evalio_pgdata:

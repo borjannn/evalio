@@ -23,13 +23,25 @@ Postgres must be up and `.env` must exist before any `manage.py` command — set
 without them.
 
 ```
-docker compose up -d db
-cp env_example .env          # if .env doesn't exist
-python manage.py migrate
-python manage.py seed_demo   # demo dataset — see below
-python manage.py runserver   # backend on :8000
-cd frontend && npm run dev   # frontend on :3000
+cp env_example .env                    # if .env doesn't exist
+cp frontend/env_example frontend/.env.local
+python scripts/devdb.py                # db up + migrate + seed, in order
+python manage.py runserver             # backend on :8000
+cd frontend && npm run dev             # frontend on :3000
 ```
+
+`scripts/devdb.py` replaces the four-command dance. It waits on the compose healthcheck before
+migrating, so `migrate` can't race a container that is running but not yet accepting connections.
+`--fresh` drops the volume first for a genuinely empty database; without it the seed re-runs with
+`--flush`, which is idempotent.
+
+The frontend needs `DJANGO_API_URL` in `frontend/.env.local` or it throws at import time. It is
+deliberately not `NEXT_PUBLIC_` — a `NEXT_PUBLIC_` variable is inlined into the client bundle, and
+this URL is only ever used server-side.
+
+Seeding cannot be a Postgres `/docker-entrypoint-initdb.d/` script: those run as raw SQL against a
+database with no tables, and the schema belongs to Django migrations while the demo data is built
+through the ORM so `save()` hooks fire.
 
 `seed_demo` creates an admin, two teachers, eight students, topics with named banks,
 questions carrying real explanations, a published and a draft quiz, classes with a subject group
@@ -147,6 +159,16 @@ Type page, layout and route-handler props with the **globals** `PageProps<'/rout
 `next dev` and `next build` also run) and are route-aware, so `params` is typed from the folder name
 rather than by hand. They are global — don't import them. `npm run typecheck` runs typegen first for
 this reason; a bare `tsc --noEmit` on a clean checkout fails until types have been generated once.
+
+**Auth is a BFF.** The JWT lives in two httpOnly cookies and never reaches JavaScript; `lib/api.ts`
+is the only module that talks to Django and is `import "server-only"`. Every protected page calls
+`requireTeacher()` or `requireStudent()` from `lib/auth.ts` — `proxy.ts` also redirects, but it only
+checks that a cookie *exists*, which a forged value satisfies. The proxy is a fast path, not the
+guarantee.
+
+Cookie lifetimes mirror `SIMPLE_JWT` on purpose: the access cookie expires exactly when its token
+does, so "refresh cookie present, access cookie absent" is a reliable expiry signal and `proxy.ts`
+refreshes on it without parsing the JWT. Change one side and sessions break.
 
 Lint with `npm run lint` and typecheck with `npm run typecheck` in `frontend/`.
 

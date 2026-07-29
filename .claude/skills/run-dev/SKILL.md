@@ -1,6 +1,6 @@
 ---
 name: run-dev
-description: Bring up the full Evalio local stack — Postgres via docker compose, .env check, migrations, Django dev server, and the Vite frontend. Use when the user wants to run the app, start the servers, or check that a change works in the browser.
+description: Bring up the full Evalio local stack — Postgres via docker compose, .env check, migrations, seed data, Django dev server, and the Next.js frontend. Use when the user wants to run the app, start the servers, or check that a change works in the browser.
 disable-model-invocation: true
 ---
 
@@ -8,39 +8,34 @@ disable-model-invocation: true
 
 Work through these in order. Stop and report if a step fails — don't work around a failure silently.
 
-## 1. Environment file
+## 1. Environment files
 
-Check that `.env` exists at the repo root. If it doesn't, copy `env_example` to `.env`. Django's
-settings read `POSTGRES_DB/USER/PASSWORD/HOST/PORT` with no fallback values, so a missing `.env`
-produces a confusing connection error rather than a clear one.
+Two are needed:
 
-The values in `env_example` match the credentials in `docker-compose.yml`, so the copy works as-is
-for local development.
+- `.env` at the repo root — Django reads `POSTGRES_DB/USER/PASSWORD/HOST/PORT` with no fallbacks, so
+  a missing file produces a confusing connection error rather than a clear one. Copy `env_example`;
+  its values match `docker-compose.yml`.
+- `frontend/.env.local` — copy `frontend/env_example`. `lib/api.ts` throws at import time without
+  `DJANGO_API_URL`, so every frontend route 500s.
 
-## 2. Database
-
-```
-docker compose up -d db
-```
-
-This starts Postgres 16 as container `evalio_db` on port 5432 with a named volume, so data survives
-restarts. If the port is already bound, check whether a local Postgres install is competing for it
-before changing the compose file.
-
-Give it a moment to accept connections, then confirm with `docker compose ps`.
-
-## 3. Migrations
+## 2. Database, migrations and seed data
 
 ```
-python manage.py migrate
+python scripts/devdb.py
 ```
+
+One command: `docker compose up -d --wait db`, then `migrate`, then `seed_demo --flush`. The
+`--wait` blocks on the compose healthcheck, so migrate cannot race a container that is running but
+not yet accepting connections.
+
+`--fresh` drops the volume first. Offer it when the database is in an unknown state; warn that
+everything in it is lost.
+
+If Docker itself isn't running, the first command fails with a named-pipe error — start Docker
+Desktop and wait for the engine before retrying.
 
 If there are model changes that haven't been captured, run `python manage.py makemigrations` first
 and show the user the generated migration before applying it.
-
-If the database has no data, offer `python manage.py seed_demo` — it creates teachers, students,
-classes, quizzes and attempts, and prints the login for every account. Most screens are not worth
-looking at without it. `--flush` replaces a previous run and touches only the demo accounts.
 
 ## 4. Backend
 
@@ -58,17 +53,23 @@ From `frontend/`, install dependencies if `node_modules` is missing, then:
 npm run dev
 ```
 
-Next serves on port 3000, the only entry in `CORS_ALLOWED_ORIGINS`. If 3000 is taken Next picks
-another port and direct browser calls to Django will fail CORS — free the port rather than adding
-the new origin. (Once the BFF proxy lands, the browser only talks to same-origin route handlers and
-CORS stops applying at all.)
+Next serves on port 3000. The browser only ever talks to :3000 — all Django calls go server-to-server
+through the BFF — so **CORS does not apply** and a different port is not a CORS problem.
+
+If the dev server was started before `frontend/.env.local` existed, restart it. Next reads env files
+at startup, so `DJANGO_API_URL` will otherwise be undefined and every route will 500.
 
 ## 6. Report
 
 Tell the user both URLs and whether each server came up cleanly.
 
-If they need an account, note that **registration always creates a student** — `role` in the request
-body is ignored. A teacher account has to be made out of band:
+For accounts, point them at the `seed_demo` output — every account uses password `evalio123`.
+`mpetrova` is a teacher, `aivanov` a student with a perfect score, `bmarkov` a mixed result with a
+real feedback passage.
+
+If they need a *new* teacher, note that **registration always creates a student** — `role` in the
+request body is ignored, and the sign-up screen has no role control by design. A teacher account has
+to be made out of band:
 
 ```
 python manage.py createsuperuser
