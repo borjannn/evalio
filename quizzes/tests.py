@@ -285,3 +285,93 @@ class QuizListAnnotationTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         for row in response.data["results"]:
             self.assertNotIn("assignment_count", row)
+
+
+class QuestionReuseCountTests(APITestCase):
+    """The question form warns before editing a shared question, using these counts.
+
+    `submitted_answer_count` must exclude in-progress attempts: those answers can
+    still change, so they are not results an edit would make inconsistent.
+    """
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Bank")
+        self.question = Question.objects.create(
+            question_bank=self.bank, text="Shared?", created_by=self.teacher
+        )
+        self.choice = Choice.objects.create(
+            question=self.question, text="Yes", is_correct=True
+        )
+
+    def _attempt(self, quiz, *, submitted):
+        from django.utils import timezone
+
+        from attempts.models import AnswerResponse, QuizAttempt
+
+        attempt = QuizAttempt.objects.create(
+            student=make_student(f"s{QuizAttempt.objects.count()}"),
+            quiz=quiz,
+            submitted_at=timezone.now() if submitted else None,
+        )
+        AnswerResponse.objects.create(
+            attempt=attempt, question=self.question, selected_choice=self.choice
+        )
+        return attempt
+
+    def test_counts_reuse_across_quizzes_without_multiplying(self):
+        quizzes = []
+        for index in range(3):
+            quiz = Quiz.objects.create(
+                topic=self.topic, title=f"Quiz {index}", created_by=self.teacher
+            )
+            quiz.quizquestion_set.create(question=self.question, order=0)
+            quizzes.append(quiz)
+
+        self._attempt(quizzes[0], submitted=True)
+        self._attempt(quizzes[1], submitted=True)
+
+        response = self.client.get(f"/api/questions/{self.question.id}/")
+        self.assertEqual(response.status_code, 200)
+        # 3 and 2 — not 6 and 6.
+        self.assertEqual(response.data["quiz_usage_count"], 3)
+        self.assertEqual(response.data["submitted_answer_count"], 2)
+
+    def test_in_progress_answers_are_not_counted(self):
+        quiz = Quiz.objects.create(topic=self.topic, title="Q", created_by=self.teacher)
+        quiz.quizquestion_set.create(question=self.question, order=0)
+        self._attempt(quiz, submitted=False)
+
+        response = self.client.get(f"/api/questions/{self.question.id}/")
+        self.assertEqual(response.data["submitted_answer_count"], 0)
+
+    def test_bank_detail_nests_the_counts(self):
+        quiz = Quiz.objects.create(topic=self.topic, title="Q", created_by=self.teacher)
+        quiz.quizquestion_set.create(question=self.question, order=0)
+
+        response = self.client.get(f"/api/question-banks/{self.bank.id}/")
+        self.assertEqual(response.status_code, 200)
+        nested = response.data["questions"][0]
+        # Fails if the view prefetches without the annotation.
+        self.assertEqual(nested["quiz_usage_count"], 1)
+        self.assertEqual(nested["submitted_answer_count"], 0)
+
+    def test_an_unused_question_reports_zero(self):
+        response = self.client.get(f"/api/questions/{self.question.id}/")
+        self.assertEqual(response.data["quiz_usage_count"], 0)
+        self.assertEqual(response.data["submitted_answer_count"], 0)
+
+    def test_editing_a_question_still_works_with_the_write_serializer(self):
+        response = self.client.patch(
+            f"/api/questions/{self.question.id}/",
+            {
+                "text": "Edited?",
+                "choices": [{"id": self.choice.id, "text": "Yes", "is_correct": True}],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.question.refresh_from_db()
+        self.assertEqual(self.question.text, "Edited?")

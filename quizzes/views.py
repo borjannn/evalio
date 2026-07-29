@@ -1,4 +1,4 @@
-from django.db.models import Count
+from django.db.models import Count, Prefetch, Q
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -9,6 +9,7 @@ from .permissions import IsOwner, IsTeacher, IsTopicOwner
 from .serializers import (
     QuestionBankDetailSerializer,
     QuestionBankSerializer,
+    QuestionTeacherListSerializer,
     QuestionTeacherSerializer,
     QuizDetailStudentSerializer,
     QuizDetailTeacherSerializer,
@@ -16,6 +17,29 @@ from .serializers import (
     QuizTeacherListSerializer,
     TopicSerializer,
 )
+
+
+def questions_with_usage():
+    """Questions annotated with how widely they are reused.
+
+    Questions are shared by reference, so editing one changes every quiz that
+    references it. The frontend warns about that before saving, and needs numbers
+    to make the warning concrete rather than vague.
+
+    `submitted_answer_count` counts answers on **submitted** attempts only. An
+    in-progress attempt can still change its answers, so it is not yet a result
+    that an edit would make inconsistent.
+
+    `distinct=True` on both: two joins in one query multiply each other's rows.
+    """
+    return Question.objects.annotate(
+        quiz_usage_count=Count("quizzes", distinct=True),
+        submitted_answer_count=Count(
+            "responses",
+            filter=Q(responses__attempt__submitted_at__isnull=False),
+            distinct=True,
+        ),
+    )
 
 
 class TopicViewSet(viewsets.ModelViewSet):
@@ -68,7 +92,17 @@ class QuestionBankViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(topic_id=topic_id)
 
         if self.action == "retrieve":
-            return queryset.prefetch_related("questions__choices")
+            # Prefetch through the annotated queryset, so the nested questions
+            # carry their reuse counts. A plain `prefetch_related("questions")`
+            # would yield unannotated objects and the serializer would raise.
+            return queryset.prefetch_related(
+                Prefetch(
+                    "questions",
+                    queryset=questions_with_usage()
+                    .prefetch_related("choices")
+                    .order_by("created_at"),
+                )
+            )
         return queryset.annotate(question_count=Count("questions")).order_by("name")
 
     def get_serializer_class(self):
@@ -101,15 +135,32 @@ class QuestionViewSet(viewsets.ModelViewSet):
         if not (user.is_authenticated and user.is_teacher):
             return Question.objects.none()
 
+        base = (
+            questions_with_usage()
+            if self.action in ("list", "retrieve")
+            else Question.objects.all()
+        )
         queryset = (
-            Question.objects.filter(question_bank__topic__created_by=user)
+            base.filter(question_bank__topic__created_by=user)
             .select_related("question_bank")
             .prefetch_related("choices")
         )
         bank_id = self.request.query_params.get("question_bank")
         if bank_id:
             queryset = queryset.filter(question_bank_id=bank_id)
+
+        if self.action == "list":
+            # `.annotate()` adds a GROUP BY, which makes `QuerySet.ordered` False
+            # even with Meta.ordering — and an unordered queryset paginates
+            # inconsistently. Order explicitly.
+            queryset = queryset.order_by("created_at")
         return queryset
+
+    def get_serializer_class(self):
+        # Reads carry the reuse counts; writes use the plain shape.
+        if self.action in ("list", "retrieve"):
+            return QuestionTeacherListSerializer
+        return QuestionTeacherSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

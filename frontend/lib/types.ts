@@ -115,6 +115,23 @@ export type TeacherQuestion = {
   created_at: string;
 };
 
+/**
+ * `QuestionTeacherListSerializer` — GET /api/questions/ and the questions nested
+ * in a bank detail.
+ *
+ * The two counts drive the shared-question edit warning. Questions are shared by
+ * reference, so editing one changes every quiz that uses it;
+ * `submitted_answer_count` covers **submitted** attempts only, since in-progress
+ * answers can still change and aren't yet results an edit would invalidate.
+ *
+ * Separate from `TeacherQuestion` because that shape is what writes use and what
+ * the quiz detail endpoint returns, neither of which carries the annotations.
+ */
+export type TeacherQuestionWithUsage = TeacherQuestion & {
+  quiz_usage_count: number;
+  submitted_answer_count: number;
+};
+
 /** `TopicSerializer`. Shallow by design — quizzes and banks load from their own endpoints. */
 export type Topic = {
   id: number;
@@ -143,7 +160,7 @@ export type QuestionBankDetail = {
   id: number;
   topic: number;
   name: string;
-  questions: TeacherQuestion[];
+  questions: TeacherQuestionWithUsage[];
   created_at: string;
   updated_at: string;
 };

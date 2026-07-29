@@ -84,6 +84,29 @@ class QuestionTeacherSerializer(serializers.ModelSerializer):
         return instance
 
 
+class QuestionTeacherListSerializer(QuestionTeacherSerializer):
+    """Read shape for the bank screens, adding how widely the question is reused.
+
+    Questions are shared by reference, so editing one changes every quiz using it.
+    These two numbers are what let the question form warn about that concretely
+    instead of vaguely — see FRONTEND_PLAN §5.4.
+
+    Kept separate from `QuestionTeacherSerializer` because that one is also used
+    for writes and by `QuizDetailTeacherSerializer`, where the objects come from
+    `quizquestion_set` and carry no annotations. A serializer field whose
+    attribute is missing raises rather than returning null.
+    """
+
+    quiz_usage_count = serializers.IntegerField(read_only=True)
+    submitted_answer_count = serializers.IntegerField(read_only=True)
+
+    class Meta(QuestionTeacherSerializer.Meta):
+        fields = QuestionTeacherSerializer.Meta.fields + (
+            "quiz_usage_count",
+            "submitted_answer_count",
+        )
+
+
 class QuestionStudentSerializer(serializers.ModelSerializer):
     choices = ChoiceReadSerializer(many=True)
 
@@ -175,9 +198,14 @@ class QuestionBankSerializer(serializers.ModelSerializer):
 
 
 class QuestionBankDetailSerializer(serializers.ModelSerializer):
-    """Retrieve shape: the bank's questions, for the bank contents screen."""
+    """Retrieve shape: the bank's questions, for the bank contents screen.
 
-    questions = QuestionTeacherSerializer(many=True, read_only=True)
+    The nested questions carry reuse counts, which only exist if the view
+    prefetches them through an annotated queryset — see
+    `QuestionBankViewSet.get_queryset`.
+    """
+
+    questions = QuestionTeacherListSerializer(many=True, read_only=True)
 
     class Meta:
         model = QuestionBank
