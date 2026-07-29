@@ -1,30 +1,42 @@
-from django.shortcuts import render
-from rest_framework import viewsets, status
-from rest_framework.permissions import IsAuthenticated
+from django.db.models import Count
+from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Module, Question, Quiz, Topic, QuestionBank, QuizQuestion
+from .models import Question, QuestionBank, Quiz, QuizQuestion, Topic
 from .permissions import IsOwner, IsTeacher, IsTopicOwner
 from .serializers import (
-    ModuleSerializer,
+    QuestionBankDetailSerializer,
+    QuestionBankSerializer,
     QuestionTeacherSerializer,
     QuizDetailStudentSerializer,
-    QuizSerializer,
     QuizDetailTeacherSerializer,
+    QuizSerializer,
     TopicSerializer,
-    QuestionBankSerializer,
 )
 
 
 class TopicViewSet(viewsets.ModelViewSet):
     queryset = Topic.objects.all()
     serializer_class = TopicSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["name", "description"]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_authenticated and user.is_teacher:
-            return Topic.objects.filter(created_by=user)
+            # `.annotate()` adds a GROUP BY, which makes `QuerySet.ordered` False even
+            # though Meta.ordering is set — and an unordered queryset paginates
+            # inconsistently, so a row can appear on two pages or none. Order explicitly.
+            return (
+                Topic.objects.filter(created_by=user)
+                .annotate(
+                    quiz_count=Count("quizzes", distinct=True),
+                    question_bank_count=Count("question_banks", distinct=True),
+                )
+                .order_by("-created_at")
+            )
         return Topic.objects.none()
 
     def get_permissions(self):
@@ -33,49 +45,70 @@ class TopicViewSet(viewsets.ModelViewSet):
         return [IsTeacher(), IsOwner()]
 
     def perform_create(self, serializer):
-        # Automatically create a question bank for the topic
+        # Every topic starts with one bank so there is always somewhere to put a question.
         topic = serializer.save(created_by=self.request.user)
-        QuestionBank.objects.create(topic=topic)
+        QuestionBank.objects.create(topic=topic, name=QuestionBank.DEFAULT_NAME)
 
 
 class QuestionBankViewSet(viewsets.ModelViewSet):
     queryset = QuestionBank.objects.all()
     serializer_class = QuestionBankSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["name"]
 
     def get_queryset(self):
         user = self.request.user
-        if user.is_authenticated and user.is_teacher:
-            return QuestionBank.objects.filter(topic__created_by=user)
-        return QuestionBank.objects.none()
+        if not (user.is_authenticated and user.is_teacher):
+            return QuestionBank.objects.none()
+
+        queryset = QuestionBank.objects.filter(topic__created_by=user).select_related("topic")
+        topic_id = self.request.query_params.get("topic")
+        if topic_id:
+            queryset = queryset.filter(topic_id=topic_id)
+
+        if self.action == "retrieve":
+            return queryset.prefetch_related("questions__choices")
+        return queryset.annotate(question_count=Count("questions")).order_by("name")
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return QuestionBankDetailSerializer
+        return QuestionBankSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [IsAuthenticated(), IsTeacher()]
         return [IsTeacher(), IsTopicOwner()]
 
-
-class ModuleViewSet(viewsets.ModelViewSet):
-    queryset = Module.objects.all()
-    serializer_class = ModuleSerializer
-
-    def get_permissions(self):
-        if self.action in ("list", "retrieve"):
-            return [IsAuthenticated()]
-        return [IsTeacher(), IsOwner()]
-
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        # A bank has no `created_by` of its own — it inherits ownership from its topic,
+        # so the topic must be verified here rather than by an object-level permission.
+        topic = serializer.validated_data["topic"]
+        if topic.created_by_id != self.request.user.id:
+            self.permission_denied(self.request, message="You do not own this topic.")
+        serializer.save()
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
     queryset = Question.objects.all()
     serializer_class = QuestionTeacherSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["text"]
 
     def get_queryset(self):
         user = self.request.user
-        if user.is_authenticated and user.is_teacher:
-            return Question.objects.filter(created_by=user)
-        return Question.objects.none()
+        if not (user.is_authenticated and user.is_teacher):
+            return Question.objects.none()
+
+        queryset = (
+            Question.objects.filter(question_bank__topic__created_by=user)
+            .select_related("question_bank")
+            .prefetch_related("choices")
+        )
+        bank_id = self.request.query_params.get("question_bank")
+        if bank_id:
+            queryset = queryset.filter(question_bank_id=bank_id)
+        return queryset
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
@@ -83,6 +116,9 @@ class QuestionViewSet(viewsets.ModelViewSet):
         return [IsTeacher(), IsTopicOwner()]
 
     def perform_create(self, serializer):
+        bank = serializer.validated_data["question_bank"]
+        if bank.topic.created_by_id != self.request.user.id:
+            self.permission_denied(self.request, message="You do not own this question bank.")
         serializer.save(created_by=self.request.user)
 
 
@@ -91,24 +127,31 @@ class QuizViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.is_authenticated and user.is_teacher:
-            return Quiz.objects.filter(created_by=user)
-        return Quiz.objects.none()
+        if not user.is_authenticated:
+            return Quiz.objects.none()
+        if user.is_teacher:
+            return Quiz.objects.filter(created_by=user).select_related("topic")
+        # Students see only published quizzes assigned to them — see quizzes/selectors.py.
+        from .selectors import quizzes_assigned_to
+
+        return quizzes_assigned_to(user).select_related("topic")
 
     def get_serializer_class(self):
+        if self.action == "retrieve" and self.request.user.is_student:
+            return QuizDetailStudentSerializer
         if self.action == "retrieve":
-            if self.request.user.is_student:
-                return QuizDetailStudentSerializer
-            else:
-                return QuizDetailTeacherSerializer
+            return QuizDetailTeacherSerializer
         return QuizSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
-            return [IsAuthenticated(), IsTeacher()]
+            return [IsAuthenticated()]
         return [IsTeacher(), IsOwner()]
 
     def perform_create(self, serializer):
+        topic = serializer.validated_data["topic"]
+        if topic.created_by_id != self.request.user.id:
+            self.permission_denied(self.request, message="You do not own this topic.")
         serializer.save(created_by=self.request.user)
 
     @action(detail=True, methods=["post"], permission_classes=[IsTeacher, IsOwner])
@@ -124,28 +167,25 @@ class QuizViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            question = Question.objects.get(id=question_id)
-        except Question.DoesNotExist:
+        # Only questions from a bank this teacher owns — otherwise a quiz could pull in
+        # another teacher's question by id.
+        question = (
+            Question.objects.filter(id=question_id, question_bank__topic__created_by=request.user)
+            .first()
+        )
+        if question is None:
             return Response(
                 {"error": "Question not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check if question already in quiz
         if quiz.questions.filter(id=question_id).exists():
             return Response(
                 {"error": "Question already in this quiz"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        quiz_question, created = QuizQuestion.objects.get_or_create(
-            quiz=quiz, question=question, defaults={"order": order}
-        )
-
-        if not created:
-            quiz_question.order = order
-            quiz_question.save()
+        quiz_question = QuizQuestion.objects.create(quiz=quiz, question=question, order=order)
 
         return Response(
             {
@@ -169,12 +209,59 @@ class QuizViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            QuizQuestion.objects.get(quiz=quiz, question_id=question_id).delete()
-        except QuizQuestion.DoesNotExist:
+        deleted, _ = QuizQuestion.objects.filter(quiz=quiz, question_id=question_id).delete()
+        if not deleted:
             return Response(
                 {"error": "Question not in this quiz"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["get"], permission_classes=[IsTeacher, IsOwner])
+    def attempts(self, request, pk=None):
+        """GET /api/quizzes/{id}/attempts/ — every attempt on this teacher's quiz."""
+        from attempts.models import QuizAttempt
+        from attempts.serializers import TeacherAttemptListSerializer
+
+        quiz = self.get_object()
+        queryset = (
+            QuizAttempt.objects.filter(quiz=quiz)
+            .select_related("student", "quiz", "feedback")
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            return self.get_paginated_response(TeacherAttemptListSerializer(page, many=True).data)
+        return Response(TeacherAttemptListSerializer(queryset, many=True).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsTeacher, IsOwner])
+    def reorder(self, request, pk=None):
+        """Set the order of every question in one atomic call.
+
+        Body: `{"question_ids": [12, 7, 3]}` — position in the list becomes the order.
+
+        Replaces the old client-side loop of remove_question/add_question calls, which
+        was neither atomic nor idempotent: an interruption part-way through left the
+        quiz missing questions.
+        """
+        quiz = self.get_object()
+        question_ids = request.data.get("question_ids")
+
+        if not isinstance(question_ids, list):
+            return Response(
+                {"error": "question_ids must be a list"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rows = {qq.question_id: qq for qq in QuizQuestion.objects.filter(quiz=quiz)}
+        if set(question_ids) != set(rows):
+            return Response(
+                {"error": "question_ids must name exactly the questions currently in this quiz"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        for order, question_id in enumerate(question_ids):
+            rows[question_id].order = order
+        QuizQuestion.objects.bulk_update(rows.values(), ["order"])
+
+        return Response({"question_ids": question_ids})

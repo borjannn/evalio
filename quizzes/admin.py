@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import Choice, Module, Question, Quiz, QuizQuestion, Topic, QuestionBank
+
+from .models import Choice, Question, QuestionBank, Quiz, QuizQuestion, Topic
 
 
 class ChoiceInline(admin.TabularInline):
@@ -12,30 +13,31 @@ class QuizInline(admin.TabularInline):
     extra = 1
 
 
+class QuestionBankInline(admin.TabularInline):
+    model = QuestionBank
+    extra = 1
+
+
 @admin.register(Topic)
 class TopicAdmin(admin.ModelAdmin):
     list_display = ("name", "created_by", "created_at")
     list_filter = ("created_by", "created_at")
-    inlines = [QuizInline]
+    inlines = [QuestionBankInline, QuizInline]
 
 
 @admin.register(QuestionBank)
 class QuestionBankAdmin(admin.ModelAdmin):
-    list_display = ("topic", "created_at")
-    list_filter = ("created_at",)
+    list_display = ("name", "topic", "created_at")
+    list_filter = ("topic", "created_at")
+    search_fields = ("name",)
 
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ("text", "question_bank", "module", "question_type", "created_by")
-    list_filter = ("module", "question_type", "question_bank__topic")
+    list_display = ("text", "question_bank", "question_type", "created_by")
+    list_filter = ("question_type", "question_bank__topic")
+    search_fields = ("text",)
     inlines = [ChoiceInline]
-
-
-@admin.register(Module)
-class ModuleAdmin(admin.ModelAdmin):
-    list_display = ("name", "parent", "created_by")
-    list_filter = ("parent",)
 
 
 class QuizQuestionInline(admin.TabularInline):
@@ -45,6 +47,6 @@ class QuizQuestionInline(admin.TabularInline):
 
 @admin.register(Quiz)
 class QuizAdmin(admin.ModelAdmin):
-    list_display = ("title", "topic", "created_by", "created_at")
-    list_filter = ("topic", "created_by", "created_at")
+    list_display = ("title", "topic", "is_published", "created_by", "created_at")
+    list_filter = ("is_published", "topic", "created_by", "created_at")
     inlines = [QuizQuestionInline]

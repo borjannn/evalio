@@ -1,11 +1,10 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import ModuleViewSet, QuestionViewSet, QuizViewSet, TopicViewSet, QuestionBankViewSet
+from .views import QuestionBankViewSet, QuestionViewSet, QuizViewSet, TopicViewSet
 
 router = DefaultRouter()
 router.register("topics", TopicViewSet)
 router.register("question-banks", QuestionBankViewSet)
-router.register("modules", ModuleViewSet)
 router.register("questions", QuestionViewSet)
 router.register("quizzes", QuizViewSet)
 
