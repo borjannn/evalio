@@ -207,3 +207,81 @@ class QuizReorderTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 404)
+
+
+class QuizListAnnotationTests(APITestCase):
+    """The topic hub reads `question_count` and `assignment_count` off the list endpoint.
+
+    Both are annotations, and both are easy to get silently wrong: joining
+    questions and assignments in one query multiplies the rows, so without
+    `distinct=True` a quiz with 3 questions assigned to 2 classes reports 6 of each.
+    """
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        self.other_topic = Topic.objects.create(name="Software", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Bank")
+
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", created_by=self.teacher
+        )
+        for index in range(3):
+            question = Question.objects.create(
+                question_bank=self.bank, text=f"Q{index}", created_by=self.teacher
+            )
+            self.quiz.quizquestion_set.create(question=question, order=index)
+
+    def test_counts_are_not_multiplied_by_the_join(self):
+        from classes.models import Class, QuizAssignment
+
+        for name in ("5A", "5B"):
+            school_class = Class.objects.create(
+                name=name, school_year="2025/2026", created_by=self.teacher
+            )
+            QuizAssignment.objects.create(
+                quiz=self.quiz, school_class=school_class, assigned_by=self.teacher
+            )
+
+        response = self.client.get("/api/quizzes/")
+        self.assertEqual(response.status_code, 200)
+        row = response.data["results"][0]
+
+        # 3 and 2, not 6 and 6.
+        self.assertEqual(row["question_count"], 3)
+        self.assertEqual(row["assignment_count"], 2)
+
+    def test_counts_are_zero_for_an_empty_quiz(self):
+        Quiz.objects.create(topic=self.topic, title="Empty", created_by=self.teacher)
+
+        response = self.client.get(f"/api/quizzes/?topic={self.topic.id}")
+        empty = next(r for r in response.data["results"] if r["title"] == "Empty")
+        self.assertEqual(empty["question_count"], 0)
+        self.assertEqual(empty["assignment_count"], 0)
+
+    def test_topic_filter_scopes_the_list(self):
+        Quiz.objects.create(topic=self.other_topic, title="Elsewhere", created_by=self.teacher)
+
+        response = self.client.get(f"/api/quizzes/?topic={self.topic.id}")
+        titles = [row["title"] for row in response.data["results"]]
+        self.assertEqual(titles, ["Unit 1"])
+
+    def test_topic_filter_cannot_reach_another_teachers_quizzes(self):
+        intruder = make_teacher("intruder")
+        their_topic = Topic.objects.create(name="Theirs", created_by=intruder)
+        Quiz.objects.create(topic=their_topic, title="Secret", created_by=intruder)
+
+        response = self.client.get(f"/api/quizzes/?topic={their_topic.id}")
+        # The ownership filter runs first, so a valid topic id belonging to someone
+        # else yields an empty list rather than their quizzes.
+        self.assertEqual(response.data["results"], [])
+
+    def test_student_list_has_no_teacher_annotations(self):
+        student = make_student()
+        self.client.force_authenticate(student)
+
+        response = self.client.get("/api/quizzes/")
+        self.assertEqual(response.status_code, 200)
+        for row in response.data["results"]:
+            self.assertNotIn("assignment_count", row)

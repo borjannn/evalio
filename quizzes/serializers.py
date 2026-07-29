@@ -99,6 +99,23 @@ class QuizSerializer(serializers.ModelSerializer):
         read_only_fields = ("created_by", "created_at")
 
 
+class QuizTeacherListSerializer(QuizSerializer):
+    """List shape for the topic hub: how big the quiz is, and whether it's out there.
+
+    Split from `QuizSerializer` rather than adding the fields to it because the
+    student quiz list uses that one, and the annotations these read only exist on
+    the teacher branch of `get_queryset()`. A serializer field whose attribute is
+    missing raises rather than returning null, so the two shapes have to be
+    separate — the same teacher/student split the rest of the app uses.
+    """
+
+    question_count = serializers.IntegerField(read_only=True)
+    assignment_count = serializers.IntegerField(read_only=True)
+
+    class Meta(QuizSerializer.Meta):
+        fields = QuizSerializer.Meta.fields + ("question_count", "assignment_count")
+
+
 class QuizDetailTeacherSerializer(serializers.ModelSerializer):
     """Full quiz details for teachers with all questions and choices."""
     questions = serializers.SerializerMethodField()

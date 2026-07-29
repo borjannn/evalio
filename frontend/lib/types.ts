@@ -159,6 +159,19 @@ export type Quiz = {
   created_at: string;
 };
 
+/**
+ * `QuizTeacherListSerializer` — GET /api/quizzes/ as a teacher, and the shape the
+ * topic hub lists. Supports `?topic=<id>`.
+ *
+ * The two counts are annotations and exist only on the teacher branch of
+ * `get_queryset()`, which is why this is a separate type from `Quiz` rather than
+ * two optional fields: the student list genuinely does not have them.
+ */
+export type TeacherQuizListItem = Quiz & {
+  question_count: number;
+  assignment_count: number;
+};
+
 /** `QuizDetailTeacherSerializer`. Questions are flattened with their ordering. */
 export type QuizDetailTeacher = Quiz & {
   questions: (TeacherQuestion & { order: number; quiz_question_id: number })[];

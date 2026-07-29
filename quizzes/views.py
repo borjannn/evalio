@@ -13,6 +13,7 @@ from .serializers import (
     QuizDetailStudentSerializer,
     QuizDetailTeacherSerializer,
     QuizSerializer,
+    QuizTeacherListSerializer,
     TopicSerializer,
 )
 
@@ -129,8 +130,27 @@ class QuizViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_authenticated:
             return Quiz.objects.none()
+
         if user.is_teacher:
-            return Quiz.objects.filter(created_by=user).select_related("topic")
+            queryset = Quiz.objects.filter(created_by=user).select_related("topic")
+
+            topic_id = self.request.query_params.get("topic")
+            if topic_id:
+                queryset = queryset.filter(topic_id=topic_id)
+
+            if self.action == "list":
+                # `.annotate()` adds a GROUP BY, which makes `QuerySet.ordered` False
+                # even though Meta.ordering is set — and an unordered queryset
+                # paginates inconsistently. Order explicitly.
+                #
+                # distinct=True on both: without it the two joins multiply, and a
+                # quiz with 5 questions assigned to 3 classes reports 15 of each.
+                queryset = queryset.annotate(
+                    question_count=Count("questions", distinct=True),
+                    assignment_count=Count("assignments", distinct=True),
+                ).order_by("-created_at")
+            return queryset
+
         # Students see only published quizzes assigned to them — see quizzes/selectors.py.
         from .selectors import quizzes_assigned_to
 
@@ -141,6 +161,8 @@ class QuizViewSet(viewsets.ModelViewSet):
             return QuizDetailStudentSerializer
         if self.action == "retrieve":
             return QuizDetailTeacherSerializer
+        if self.action == "list" and self.request.user.is_teacher:
+            return QuizTeacherListSerializer
         return QuizSerializer
 
     def get_permissions(self):
