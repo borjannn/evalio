@@ -26,9 +26,23 @@ without them.
 docker compose up -d db
 cp env_example .env          # if .env doesn't exist
 python manage.py migrate
+python manage.py seed_demo   # demo dataset — see below
 python manage.py runserver   # backend on :8000
 cd frontend && npm run dev   # frontend on :3000
 ```
+
+`seed_demo` creates an admin, two teachers, eight students, topics with named banks,
+questions carrying real explanations, a published and a draft quiz, classes with a subject group
+whose roster is a strict subset, all three assignment target types, and four attempts — perfect,
+mixed, weak-with-an-unanswered-question, and one still in progress. Password for every account is
+printed at the end.
+
+Use it rather than clicking data in by hand: the quiz builder, roster and results screens are
+meaningless against an empty database, and the feedback passage only reads correctly when several
+explanations are stitched together.
+
+`--flush` removes the previous run. It deletes **only** the demo accounts and what cascades from
+them, so unrelated rows already in your database survive.
 
 ## Dependencies
 

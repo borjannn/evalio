@@ -38,6 +38,10 @@ python manage.py migrate
 If there are model changes that haven't been captured, run `python manage.py makemigrations` first
 and show the user the generated migration before applying it.
 
+If the database has no data, offer `python manage.py seed_demo` — it creates teachers, students,
+classes, quizzes and attempts, and prints the login for every account. Most screens are not worth
+looking at without it. `--flush` replaces a previous run and touches only the demo accounts.
+
 ## 4. Backend
 
 Start the Django dev server on port 8000 in the background:

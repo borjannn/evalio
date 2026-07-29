@@ -314,6 +314,18 @@ names the relation that reaches the owning teacher.
 
 ---
 
+## Local demo data
+
+`python manage.py seed_demo` (in `quizzes/management/commands/`) builds a full working dataset:
+an admin, two teachers, eight students, two topics with named banks, nine questions with real
+per-choice explanations, a published and a draft quiz, two classes with a subject group whose roster
+is a strict subset of its class, one assignment of each target type, and four attempts covering a
+perfect score, a mixed result, a weak result with an unanswered question, and one still in progress.
+
+`--flush` deletes only the demo accounts and what cascades from them, so unrelated rows survive.
+
+---
+
 ## Known gaps
 
 Not yet implemented. Listed so this document doesn't drift into describing intentions as facts.
