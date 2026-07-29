@@ -1,0 +1,6 @@
+# Copy to .env.local (gitignored) before running the frontend.
+#
+# Deliberately NOT prefixed NEXT_PUBLIC_. A NEXT_PUBLIC_ variable is inlined into
+# the client bundle at build time; this URL is only ever used server-side, by the
+# BFF layer in lib/api.ts. The browser never talks to Django directly.
+DJANGO_API_URL=http://localhost:8000/api

@@ -154,23 +154,36 @@ the states every screen owes.
 
 ## 4. Talking to Django
 
-⚠️ **Not built yet.** The plan calls for a BFF: Next route handlers under `app/api/` hold the JWT in
-an httpOnly cookie and proxy to Django, so no token ever reaches JavaScript. Django stays
-token-based and unchanged — `POST /api/auth/login/` and `/api/auth/login/refresh/` (SimpleJWT) plus
-`GET /api/auth/me/` already exist, so no backend work is required first. Whoever builds the first
-authenticated screen builds this.
+**Built.** The JWT lives in two httpOnly cookies and never reaches JavaScript. Four files:
 
-Two consequences worth knowing when you do:
+| File | Job |
+|---|---|
+| `lib/api.ts` | The only module that talks to Django. `import "server-only"`, generic `apiGet<T>` / `apiPost<T>`, throws `ApiError` |
+| `lib/session.ts` | Reads and writes the cookies. Writes are only legal from a Route Handler or Server Function |
+| `lib/cookies.ts` | Names and lifetimes, no imports — `proxy.ts` needs them where `next/headers` is unavailable |
+| `lib/auth.ts` | `getUser` / `requireUser` / `requireTeacher` / `requireStudent`. The real authorization check |
 
-- The browser talks only to same-origin `/api/...` on :3000, so **CORS stops being relevant** — the
-  server-to-server hop to :8000 isn't subject to it.
-- Reading the session cookie makes a route dynamic. That's correct here; this app has no cacheable
-  pages.
+**Use `requireTeacher()` or `requireStudent()` at the top of every protected page.** The proxy also
+redirects, but only *optimistically* — it checks that a cookie exists, and a cookie can hold a
+revoked or forged token. `lib/auth.ts` asks Django who the bearer is. Verified: a request carrying
+`evalio_access=not-a-real-jwt` passes the proxy and is then rejected by the DAL.
 
-Until it exists, put every call to Django behind a helper in `lib/` marked `import 'server-only'`,
-so the swap happens in one file. Never `fetch` Django directly from a Client Component, and never
-put the JWT in `localStorage` — that was the old SPA's approach and it is not what the plan calls
-for.
+`getUser` is wrapped in React `cache()`, so a layout plus three nested Server Components calling it
+produce one request to Django, not four.
+
+Consequences worth knowing:
+
+- The browser talks only to same-origin :3000, so **CORS is irrelevant** — the server-to-server hop
+  to :8000 isn't subject to it.
+- Reading the session cookie makes a route dynamic. Correct here; nothing in this app is cacheable
+  across users.
+- Access tokens last 2h and refresh 7d, matching `SIMPLE_JWT`. The access cookie's max-age matches
+  the token's, so when it expires the browser stops sending it — `proxy.ts` treats "refresh present,
+  access absent" as the signal to mint a new one, with no JWT parsing. **Changing one lifetime
+  without the other breaks the refresh.**
+
+Never `fetch` Django from a Client Component, and never put the JWT in `localStorage` — that was the
+old SPA's approach and it is not what this is.
 
 ## 5. Mutations
 
