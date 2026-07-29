@@ -1,542 +1,332 @@
-# Evalio - Project Architecture Documentation
+# Evalio — Project Architecture
 
-## Project Overview
+**Evalio** is a Django REST Framework platform where teachers build quizzes from reusable question
+banks, assign them to classes or individual students, and students receive targeted feedback on what
+they got wrong. Role-based access (teacher / student), JWT authentication.
 
-**Evalio** is a Django REST Framework-based educational platform that allows teachers to create and manage quizzes and provides feedback to students based on their quiz performance. The system supports role-based access (Teachers and Students) and uses JWT authentication.
+**Stack:** Django 6.0 + DRF · `rest_framework_simplejwt` · PostgreSQL 16 (docker-compose) ·
+Next.js 16 frontend (App Router, being built)
 
-**Tech Stack:**
-- Backend: Django 6.0.6 with Django REST Framework
-- Authentication: JWT (rest_framework_simplejwt)
-- Frontend: React with Vite
-- Database: Relational (Django ORM)
-
----
-
-## Core Data Models & Relationships
-
-### 1. **User (Accounts App)**
-The central identity model extending Django's AbstractUser.
-
-**Fields:**
-- `username` (string, unique) - User login identifier
-- `email` (string, unique) - User email address
-- `first_name` (string) - User's first name
-- `last_name` (string) - User's last name
-- `password` (hashed string) - Securely stored password
-- `role` (choice: "teacher" | "student") - User's role in the system
-- `is_active` (boolean) - Account status
-- `date_joined` (datetime) - Registration timestamp
-
-**Related Objects:**
-- `topics` - Topics created by this user
-- `modules` - Modules created by this user
-- `questions` - Questions created by this user
-- `quizzes` - Quizzes created by this user
-- `attempts` - Quiz attempts made by this user (if student)
-- `feedback_rules` - Feedback rules created by this user (if teacher)
-
-**User Roles:**
-- **Teacher**: Can create topics, questions, modules, quizzes, and feedback rules
-- **Student**: Can take quizzes and receive feedback
+> This document is meant to match the code. When you change a model, endpoint, or flow, update it in
+> the same change. Endpoints listed under *API surface* were verified against the URL resolver;
+> anything not yet built is in *Known gaps* at the bottom rather than described as if it exists.
 
 ---
 
-### 2. **Topic (Quizzes App)**
-A subject/course that organizes quizzes and their question bank.
+## Feedback model — per-choice explanations
 
-**Fields:**
-- `id` (primary key)
-- `name` (string, max 200) - Topic title
-- `description` (text, optional) - Topic description
-- `created_by` (ForeignKey → User) - Teacher who created it
-- `created_at` (datetime) - Creation timestamp
-- `updated_at` (datetime) - Last modification timestamp
+This is the defining design decision of the app, and it replaced an earlier system.
 
-**Related Objects:**
-- `quizzes` - All quizzes belonging to this topic
-- `question_bank` - The associated question bank (1-to-1)
+**Removed:** the score-threshold system. `FeedbackRule` (a teacher-authored band like
+`50–74% → "Good effort, practice more"` scoped to a module) no longer exists. It was dropped in
+`feedback/migrations/0002_per_choice_feedback.py`.
 
-**Relationships:**
+**Current:** every `Choice` carries a teacher-written `feedback_text` explaining why that option is
+wrong. When a student submits an attempt, the explanations for every choice they picked incorrectly
+are concatenated — in quiz order, joined with linking phrases — into one passage.
+
 ```
-User (Teacher) ──[creates]──> Topic
-                              │
-                              ├──[contains]──> Quiz
-                              └──[has]──> QuestionBank
+Question: "What kind of device is a microphone?"
+  Input          ← correct,  feedback_text: ""
+  Output         ← incorrect, feedback_text: "Output is wrong: a microphone captures sound
+                               rather than producing it."
+  Input/output   ← incorrect, feedback_text: "A microphone only captures; it has no output stage."
+  None of these  ← incorrect, feedback_text: "A microphone is definitely a device of some kind."
 ```
+
+A student who picks *Output* on this question and *Input/output* on the next gets:
+
+> Output is wrong: a microphone captures sound rather than producing it. **Also,** a speaker only
+> produces sound.
+
+Implemented in `feedback/services.py::generate_feedback`. Behaviour worth knowing:
+
+- Explanations follow **quiz order** (`QuizQuestion.order`), not the order the student answered in.
+- **Unanswered** questions count against the score but contribute no explanation.
+- Wrong answers whose explanation is **blank** are skipped, so a teacher who hasn't filled them in
+  degrades gracefully instead of emitting empty filler.
+- A perfect score returns a fixed congratulatory message; a non-perfect score with no usable
+  explanations returns a fixed "your teacher hasn't added explanations yet" message.
+- Generation is idempotent — `update_or_create` on the attempt, so re-submitting rebuilds in place.
+- Explanations are read from the **snapshot on `AnswerResponse`**, not from the live `Choice`. See
+  *Answer snapshots* below.
 
 ---
 
-### 3. **QuestionBank (Quizzes App)**
-A container for all questions related to a specific topic. One-to-one relationship with Topic.
+## Answer snapshots
 
-**Fields:**
-- `id` (primary key)
-- `topic` (OneToOneField → Topic) - Associated topic
-- `created_at` (datetime) - Creation timestamp
-- `updated_at` (datetime) - Last modification timestamp
+Questions are **shared by reference**: a quiz points at a bank question through `QuizQuestion`, so
+editing that question changes every quiz using it. Storing only a foreign key on an answer would let
+a later edit silently rewrite what a submitted attempt appears to have asked.
 
-**Related Objects:**
-- `questions` - All questions in this bank
+`AnswerResponse` therefore copies `question_text`, `choice_text`, and `choice_feedback_text` at
+answer time, in `AnswerResponse.save()`. Both foreign keys are `SET_NULL`, so deleting a question or
+choice cannot delete a student's submitted work.
 
-**Purpose:** Centralizes question management for a topic, allowing questions to be reused across multiple quizzes.
-
----
-
-### 4. **Module (Quizzes App)**
-A hierarchical organizational unit representing course sections/chapters. Can have sub-modules.
-
-**Fields:**
-- `id` (primary key)
-- `name` (string, max 200) - Module name
-- `description` (text, optional) - Module description
-- `parent` (ForeignKey → Module, nullable) - Parent module for hierarchy
-- `created_by` (ForeignKey → User) - Teacher who created it
-- `created_at` (datetime) - Creation timestamp
-
-**Related Objects:**
-- `submodules` - Child modules
-- `questions` - Questions belonging to this module
-- `feedback_rules` - Feedback rules for this module
-- `feedback_results` - Generated feedback results for this module
-
-**Hierarchy Example:**
-```
-Module: "Mathematics"
-├── Module: "Algebra"
-│   └── Module: "Linear Equations"
-├── Module: "Geometry"
-│   └── Module: "Shapes"
-```
+This closed a real data-loss bug: `selected_choice` was `CASCADE` and
+`QuestionTeacherSerializer.update()` deleted and recreated every choice on edit, so a teacher fixing
+a typo destroyed the answer rows of everyone who had already submitted. `update()` now diffs choices
+by id instead.
 
 ---
 
-### 5. **Question (Quizzes App)**
-An individual assessment item with multiple choice or true/false format.
+## Data models
 
-**Fields:**
-- `id` (primary key)
-- `question_bank` (ForeignKey → QuestionBank) - Which question bank this belongs to
-- `module` (ForeignKey → Module) - Which module this question covers
-- `text` (text) - The question content
-- `question_type` (choice: "mc" | "tf") - Multiple Choice or True/False
-- `created_by` (ForeignKey → User) - Teacher who created it
-- `created_at` (datetime) - Creation timestamp
+### accounts
 
-**Related Objects:**
-- `choices` - Answer options for this question
-- `quizzes` - Quizzes that include this question
+**User** — extends `AbstractUser`. Adds `role` (`teacher` | `student`) plus `is_teacher` /
+`is_student` properties. Set as `AUTH_USER_MODEL`.
 
-**Relationship Diagram:**
+Public registration **always creates a student** — `role` is read-only on `RegisterSerializer` and
+forced server-side. Teacher accounts are made out of band (`createsuperuser`, then set `role` in the
+admin).
+
+### quizzes
+
+| Model | Purpose | Key fields |
+|---|---|---|
+| **Topic** | A subject that groups quizzes and banks | `name`, `description`, `created_by` |
+| **QuestionBank** | A named collection of reusable questions. **Many per topic** | `topic` (FK), `name`; unique on `(topic, name)` |
+| **Question** | An assessment item | `question_bank`, `text`, `question_type` (`mc` \| `tf`), `created_by` |
+| **Choice** | An answer option | `question`, `text`, `is_correct`, **`feedback_text`** |
+| **Quiz** | A collection of questions | `topic`, `title`, `description`, `is_published`, `created_by`, `questions` (M2M through `QuizQuestion`) |
+| **QuizQuestion** | Join table carrying order | `quiz`, `question`, `order`; unique on `(quiz, question)` |
+
+Creating a topic auto-creates one bank named `QuestionBank.DEFAULT_NAME` ("Uncategorised") in
+`TopicViewSet.perform_create`, so there is always somewhere to put a question.
+
+`is_published` is a **soft flag**: it controls whether assigned students can see and start the quiz.
+A published quiz stays editable, and un-publishing leaves existing attempts and feedback intact.
+
+**Module has been removed** (`quizzes/migrations/0003_...`). Questions are no longer tagged with a
+course section; banks do that job.
+
+### classes
+
+| Model | Purpose | Key fields |
+|---|---|---|
+| **Class** | A year-group cohort, e.g. "5B" | `name`, `school_year`, `created_by`; unique on `(name, school_year, created_by)` |
+| **Enrollment** | A student's membership of a class | `student`, `school_class`; unique together |
+| **TeachingGroup** | A subject group within a class, e.g. "5B — Mathematics" | `school_class`, `topic`, `teacher` |
+| **GroupMembership** | Which enrolled students are in that group | `group`, `enrollment` |
+| **QuizAssignment** | Who a quiz is assigned to | `quiz`, exactly one of `school_class` / `group` / `student`, `assigned_by` |
+
+`GroupMembership` points at **`Enrollment`, not `User`**. That makes "a group member is enrolled in
+the group's class" a structural guarantee rather than a validation rule: you cannot add a student to
+5B–Mathematics unless they are in 5B, and removing them from 5B cascades them out of its groups.
+
+`QuizAssignment` uses three nullable FKs rather than a `GenericForeignKey`, so assignment resolution
+stays a single SQL query and the database keeps referential integrity. Two constraints enforce it:
+
+- a `CheckConstraint` that **exactly one** target is set (Django 6 removed `check=`; the kwarg is
+  `condition=`)
+- three **partial** `UniqueConstraint`s with `condition=Q(field__isnull=False)`. Plain
+  `unique_together` would never fire, because Postgres treats every `NULL` as distinct.
+
+A class is owned by its creating teacher, so two teachers who both teach 5B each get their own row.
+Correct for a single-teacher deployment; sharing would need a School model and an admin role.
+
+### attempts
+
+| Model | Purpose | Key fields |
+|---|---|---|
+| **QuizAttempt** | A student's run at a quiz | `student`, `quiz`, `started_at`, `submitted_at` (null while in progress) |
+| **AnswerResponse** | One answer within an attempt | `attempt`, `question`, `selected_choice`, `is_correct`, snapshot fields, `answered_at` |
+
+`AnswerResponse.save()` derives `is_correct` from `selected_choice.is_correct`, so correctness is
+never client-supplied.
+
+### feedback
+
+| Model | Purpose | Key fields |
+|---|---|---|
+| **FeedbackResult** | The generated feedback for one attempt | `attempt` (**OneToOne**), `feedback_text`, `score_percent`, `correct_count`, `total_count`, `created_at` |
+
+### Relationships
+
 ```
-QuestionBank ──[contains]──> Question
-                              │
-                              ├──[covers]──> Module
-                              ├──[has]──> Choice
-                              └──[used in]──> Quiz (via QuizQuestion)
-```
+User (teacher) ──creates──> Topic ──> QuestionBank ──> Question ──> Choice
+                              │            (many)          │
+                              └──> Quiz <──QuizQuestion────┘
+                                    │        (order)
+                                    └──> QuizAssignment ──> Class | TeachingGroup | User
 
----
+Class ──> Enrollment ──> GroupMembership ──> TeachingGroup
 
-### 6. **Choice (Quizzes App)**
-An answer option for a multiple-choice or true/false question.
-
-**Fields:**
-- `id` (primary key)
-- `question` (ForeignKey → Question) - Associated question
-- `text` (string, max 255) - The choice text
-- `is_correct` (boolean) - Whether this is the correct answer
-
-**Security Note:** `is_correct` is hidden from students via role-based serializers. Teachers see it, students don't.
-
----
-
-### 7. **Quiz (Quizzes App)**
-A collection of questions organized for assessment.
-
-**Fields:**
-- `id` (primary key)
-- `topic` (ForeignKey → Topic) - Which topic this quiz is for
-- `title` (string, max 200) - Quiz name
-- `description` (text, optional) - Quiz description
-- `created_by` (ForeignKey → User) - Teacher who created it
-- `questions` (ManyToManyField → Question via QuizQuestion) - Questions in this quiz
-- `created_at` (datetime) - Creation timestamp
-
-**Related Objects:**
-- `attempts` - All attempts/submissions of this quiz
-
-**Relationship Diagram:**
-```
-Topic ──[contains]──> Quiz ──[references]──> Question
-                       │           ↑
-                       │           │
-                       └─[via QuizQuestion with order]
-                              │
-                              └──> Module (questions cover specific modules)
+User (student) ──starts──> QuizAttempt ──> AnswerResponse ──> Choice (SET_NULL)
+                                    │
+                                    └──1:1──> FeedbackResult
 ```
 
 ---
 
-### 8. **QuizQuestion (Quizzes App)**
-A junction/through model linking Quiz and Question with ordering.
+## Request flows
 
-**Fields:**
-- `id` (primary key)
-- `quiz` (ForeignKey → Quiz) - Which quiz
-- `question` (ForeignKey → Question) - Which question
-- `order` (positive integer) - Display order in the quiz
+### Teacher builds and assigns a quiz
 
-**Constraints:**
-- Unique together: (quiz, question) - Prevents duplicate questions in a quiz
-- Ordered by: `order` field
-
-**Purpose:** Maintains the sequence of questions within a quiz while allowing question reuse across multiple quizzes.
-
----
-
-### 9. **QuizAttempt (Attempts App)**
-Represents a student's attempt to complete a quiz.
-
-**Fields:**
-- `id` (primary key)
-- `student` (ForeignKey → User) - The student taking the quiz
-- `quiz` (ForeignKey → Quiz) - Which quiz they're attempting
-- `started_at` (datetime) - When the attempt began (auto-set)
-- `submitted_at` (datetime, nullable) - When the attempt was submitted (null = in progress)
-
-**Related Objects:**
-- `answers` - All answer responses for this attempt
-- `feedback_results` - Feedback generated for this attempt
-
-**Status Tracking:**
-- In Progress: `submitted_at` is null
-- Completed: `submitted_at` has a timestamp
-
----
-
-### 10. **AnswerResponse (Attempts App)**
-A student's answer to a specific question in a quiz attempt.
-
-**Fields:**
-- `id` (primary key)
-- `attempt` (ForeignKey → QuizAttempt) - Which attempt this is part of
-- `question` (ForeignKey → Question) - Which question is being answered
-- `selected_choice` (ForeignKey → Choice, nullable) - The chosen answer
-- `is_correct` (boolean) - Auto-calculated based on choice correctness
-- `answered_at` (datetime) - When the answer was submitted (auto-set)
-
-**Constraints:**
-- Unique together: (attempt, question) - Only one answer per question per attempt
-- Auto-validation: `is_correct` is automatically set based on `selected_choice.is_correct`
-
-**Data Flow:**
 ```
-Student selects answer
-    ↓
-AnswerResponse created with selected_choice
-    ↓
-is_correct automatically populated from selected_choice.is_correct
-    ↓
-Used for scoring and feedback generation
+POST /api/topics/                        → Topic created; a default QuestionBank is created with it
+POST /api/question-banks/                → Additional named banks within the topic
+POST /api/questions/                     → Question + nested Choices in one payload
+POST /api/quizzes/                       → Quiz within the Topic
+POST /api/quizzes/{id}/add_question/     → QuizQuestion row with an order
+POST /api/quizzes/{id}/reorder/          → { question_ids: [...] } — sets every order atomically
+PATCH /api/quizzes/{id}/                 → { is_published: true }
+POST /api/classes/  /enrollments/        → Roster
+POST /api/assignments/                   → { quiz, and exactly one of school_class/group/student }
+```
+
+### Student takes a quiz
+
+```
+GET  /api/quizzes/                       → only published quizzes assigned to them
+
+POST /api/attempts/start/                { "quiz_id": N }
+     → 403 unless the quiz is assigned to this student and published
+     → returns the existing in-progress attempt (200) if one exists, else creates one (201)
+
+POST /api/attempts/{id}/answer/          { "question_id": N, "choice_id": M }
+     → rejected if the question is not in this attempt's quiz
+     → AnswerResponse upserted; is_correct derived server-side; explanation snapshotted
+     → response is { question_id, choice_id, saved: true } — correctness is NOT returned
+
+POST /api/attempts/{id}/submit/
+     → submitted_at set; generate_feedback builds the FeedbackResult
+     → response is the attempt plus its feedback
+
+GET  /api/attempts/                      → the student's own attempts
+GET  /api/attempts/{id}/                 → resume, or review after submitting
+```
+
+### Scoring
+
+```
+total_count   = questions in the quiz (via QuizQuestion)
+correct_count = AnswerResponses with is_correct=True
+score_percent = correct_count / total_count * 100      (0.0 when the quiz is empty)
+feedback_text = snapshotted explanations for wrong answers, in quiz order, joined with linking phrases
 ```
 
 ---
 
-### 11. **FeedbackRule (Feedback App)**
-Teacher-defined rules for generating feedback based on performance in a specific module.
+## API surface (implemented)
 
-**Fields:**
-- `id` (primary key)
-- `module` (ForeignKey → Module) - Which module this rule applies to
-- `min_score` (positive integer) - Inclusive lower bound (percentage 0-100)
-- `max_score` (positive integer) - Inclusive upper bound (percentage 0-100)
-- `feedback_text` (text) - The feedback message to show
-- `created_by` (ForeignKey → User) - Teacher who created the rule
+All list endpoints are **paginated** — the response is `{count, next, previous, results}`, not a bare
+array (`PageNumberPagination`, `PAGE_SIZE = 25`).
 
-**Ordering:** By module and min_score
+### Authentication — `accounts/urls.py`
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/auth/register/` | Always creates a student; `role` in the body is ignored |
+| POST | `/api/auth/login/` | SimpleJWT `TokenObtainPairView` → access + refresh |
+| POST | `/api/auth/login/refresh/` | `TokenRefreshView` |
+| GET | `/api/auth/me/` | Current user |
 
-**Example:**
-```
-Module: "Linear Equations"
-├── Rule: 0-49% → "You need to review the basics..."
-├── Rule: 50-74% → "Good effort, but practice more..."
-└── Rule: 75-100% → "Excellent work on this module!"
-```
+### Quizzes — `quizzes/urls.py` (DRF `DefaultRouter` mounted at `/api/`)
+CRUD on `topics`, `question-banks`, `questions`, `quizzes`, plus:
 
----
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/quizzes/{pk}/add_question/` | `{ question_id, order }`. Underscore, not hyphen |
+| POST | `/api/quizzes/{pk}/remove_question/` | `{ question_id }` |
+| POST | `/api/quizzes/{pk}/reorder/` | `{ question_ids: [...] }` — one atomic `bulk_update` |
+| GET | `/api/quizzes/{pk}/attempts/` | Attempts on the teacher's own quiz, with student and score |
 
-### 12. **FeedbackResult (Feedback App)**
-The generated feedback given to a student after attempting a quiz.
+`topics`, `question-banks` and `questions` are teacher-only. `quizzes` list/retrieve serves both
+roles and switches serializer by role. `?search=` is supported on topics (name, description), banks
+(name) and questions (text); banks accept `?topic=` and questions `?question_bank=`.
 
-**Fields:**
-- `id` (primary key)
-- `attempt` (ForeignKey → QuizAttempt) - Which attempt this feedback is for
-- `module` (ForeignKey → Module) - Which module the feedback covers
-- `score_percent` (float) - Percentage score on that module (0-100)
-- `feedback_text` (text) - The actual feedback message
-- `source` (choice: "rule" | "llm") - Whether rule-based or AI-generated
-- `created_at` (datetime) - When feedback was generated
+### Classes — `classes/urls.py` (mounted at `/api/`)
+| Method | Path | Notes |
+|---|---|---|
+| CRUD | `/api/classes/` | Teacher-only, filtered to `created_by` |
+| CRUD | `/api/enrollments/` | `?school_class=` filter |
+| CRUD | `/api/groups/` | `?school_class=` filter |
+| CRUD | `/api/group-memberships/` | `?group=` filter |
+| CRUD | `/api/assignments/` | `?quiz=` filter |
+| GET | `/api/students/search/?q=` | Scoped, min 3 chars, never returns email |
 
-**Constraints:**
-- Unique together: (attempt, module) - One feedback per module per attempt
+### Attempts — `attempts/urls.py`
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/attempts/` | The requesting student's own attempts |
+| POST | `/api/attempts/start/` | `{ quiz_id }`; student only; requires an assignment |
+| GET | `/api/attempts/{pk}/` | Owner, or the quiz's teacher |
+| POST | `/api/attempts/{attempt_id}/answer/` | `{ question_id, choice_id }`; rejected once submitted |
+| POST | `/api/attempts/{attempt_id}/submit/` | Locks the attempt and generates feedback |
 
-**Source Types:**
-- `"rule"` - Matched a FeedbackRule
-- `"llm"` - Generated by an AI model
-
----
-
-## Data Flow Diagrams
-
-### Quiz Creation Flow (Teacher)
-```
-Teacher creates Topic
-    ↓
-System auto-creates QuestionBank for Topic
-    ↓
-Teacher creates Modules (hierarchical)
-    ↓
-Teacher creates Questions in QuestionBank
-    ├─ Each Question references a Module
-    └─ Each Question has multiple Choices
-    ↓
-Teacher creates Quiz in Topic
-    ├─ Selects Questions to include
-    └─ System creates QuizQuestion entries with order
-    ↓
-Teacher (optionally) creates FeedbackRules for Modules
-```
-
-### Quiz Attempt Flow (Student)
-```
-Student views available Quizzes
-    ↓
-Student starts Quiz
-    └─> QuizAttempt created (started_at = now, submitted_at = null)
-    ↓
-System serves Quiz details to student
-    ├─ Questions with Choices
-    └─ Correct answers are hidden
-    ↓
-Student answers Questions
-    ├─ AnswerResponse created for each question
-    ├─ selected_choice is stored
-    └─ is_correct is auto-calculated
-    ↓
-Student submits Quiz
-    └─> QuizAttempt.submitted_at = now
-    ↓
-System calculates Module scores
-    ├─ Group answers by Question.module
-    ├─ Calculate % correct per module
-    └─ Create FeedbackResults
-    ↓
-Student receives Feedback per Module
-    ├─ Matches FeedbackRule by score range
-    └─ OR generates via LLM
-```
-
-### Score Calculation Logic
-```
-For each Module in the quiz:
-    1. Find all Questions in this quiz that belong to this Module
-    2. Find AnswerResponses for those Questions in this attempt
-    3. Count correct_count / total_count
-    4. Score = (correct_count / total_count) × 100
-    5. Look up matching FeedbackRule by score range
-    6. Create FeedbackResult with matched or LLM feedback
-```
+### Feedback — `feedback/urls.py`
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/feedback/mine/` | Requesting student's own results |
+| GET | `/api/feedback/attempts/{attempt_id}/` | The student who owns it, or the quiz's teacher |
 
 ---
 
-## API Endpoint Summary
+## Security invariants
 
-### Authentication (Accounts)
-- `POST /api/auth/register/` - Student/Teacher registration
-- `POST /api/auth/login/` - JWT token generation
-- `POST /api/auth/refresh/` - Refresh JWT token
-- `GET /api/auth/me/` - Current user profile
+These are the rules the serializer and permission layers exist to enforce. Breaking one is a real
+bug, not a style issue.
 
-### Topics & Question Banks (Teacher)
-- `GET /api/topics/` - List topics
-- `POST /api/topics/` - Create topic
-- `GET /api/topics/{id}/` - Topic detail + quizzes + question bank
-- `PUT /api/topics/{id}/` - Update topic
+1. **`Choice.is_correct` never reaches a student.** `ChoiceReadSerializer` omits it;
+   `ChoiceWriteSerializer` (teacher) includes it.
+2. **`Choice.feedback_text` never reaches a student *before* submission.** In practice only
+   incorrect choices carry an explanation, so exposing the field would let a student identify the
+   right answer by finding the empty one.
+3. **The answer endpoint does not report correctness.** Returning `is_correct` per answer would hand
+   over the answer key mid-attempt and allow brute-forcing.
+4. **`AnswerResponseSerializer.is_correct` returns `None` while `submitted_at` is null.**
+5. **`AnswerResponse`'s snapshot fields are never serialized.** `choice_feedback_text`,
+   `choice_text` and `question_text` are teacher-authored content on a student-reachable model; they
+   are absent from `AnswerResponseSerializer` and reach a student only inside the assembled
+   `FeedbackResult.feedback_text`.
+6. **Starting an attempt requires an assignment.** A quiz id is a guessable integer, so being a
+   student is not authorization. `quizzes/selectors.py::quizzes_assigned_to` is the single
+   definition, used by the quiz list, the quiz retrieve, and the attempt-start check — three places
+   that must agree.
+7. **Answers must belong to the attempt's quiz.** `answer/` rejects a question not joined to the
+   quiz through `QuizQuestion`, and a choice not belonging to that question.
+8. **Student directory search is scoped** to students enrolled in one of the requesting teacher's
+   classes, requires at least 3 characters, and **never returns email**.
+9. **Ownership is server-side.** `created_by` is always in `read_only_fields` and set in
+   `perform_create`. Cross-teacher references (a bank's topic, an assignment's class) are verified
+   in `perform_create` rather than trusted from the body.
+10. **Registration cannot grant the teacher role.**
 
-### Modules (Teacher)
-- `GET /api/modules/` - List modules
-- `POST /api/modules/` - Create module (with optional parent)
-- `PUT /api/modules/{id}/` - Update module
+### Permission classes — `quizzes/permissions.py`
+- `IsTeacher` — authenticated and `role == "teacher"`
+- `IsStudent` — authenticated and `role == "student"`
+- `IsOwner` — object-level `obj.created_by_id == request.user.id`
+- `IsTopicOwner` — resolves the owning teacher for objects that may not carry `created_by`
+  themselves: `created_by` → `topic.created_by` → `question_bank.topic.created_by`. The `topic`
+  branch is what makes `QuestionBank` writable, since a bank has no `created_by` of its own.
 
-### Questions (Teacher)
-- `POST /api/question-banks/{id}/questions/` - Create question with choices
-- `PUT /api/questions/{id}/` - Update question with choices
-- `DELETE /api/questions/{id}/` - Delete question
+ViewSets enforce access in **two** places, and both are required: `get_queryset()` filters to rows
+the user owns (returning `.none()` otherwise), and `get_permissions()` returns different classes per
+action. A viewset with only one of the two is a bug — permissions alone still let `list` enumerate
+other teachers' rows, and a queryset filter alone still lets a student read whatever it returns.
 
-### Quizzes (Teacher)
-- `GET /api/quizzes/` - List quizzes
-- `POST /api/quizzes/` - Create quiz
-- `GET /api/quizzes/{id}/` - Quiz detail with questions and choices (teacher view)
-- `PUT /api/quizzes/{id}/` - Update quiz
-- `POST /api/quizzes/{id}/add-questions/` - Add questions to quiz
+Because `get_queryset()` filters before `get_object()` runs, reaching another teacher's row returns
+**404, not 403**. That is deliberate: a 403 would confirm the row exists.
 
-### Quizzes (Student)
-- `GET /api/quizzes/` - List available quizzes
-- `GET /api/quizzes/{id}/start/` - Quiz detail for attempt (student view, no answers)
-
-### Quiz Attempts (Student)
-- `POST /api/attempts/` - Start new quiz attempt
-- `GET /api/attempts/{id}/` - View attempt with answers submitted so far
-- `POST /api/attempts/{id}/submit-answer/` - Submit individual answer
-- `POST /api/attempts/{id}/submit/` - Complete attempt and get feedback
-
-### Feedback
-- `GET /api/attempts/{attempt_id}/feedback/` - Get feedback results for an attempt
-- `GET /api/feedback-rules/` - List feedback rules (teacher only)
-- `POST /api/feedback-rules/` - Create feedback rule (teacher only)
-
----
-
-## Role-Based Access Control
-
-### Teacher Permissions
-- ✅ Create/edit/delete Topics
-- ✅ Create/edit/delete Modules
-- ✅ Create/edit/delete Questions and Choices (with correct answers visible)
-- ✅ Create/edit/delete Quizzes
-- ✅ Create/edit/delete Feedback Rules
-- ✅ View all quiz attempts and student answers
-- ✅ View aggregate class analytics
-
-### Student Permissions
-- ✅ View available Quizzes
-- ✅ Start Quiz attempts
-- ✅ Submit answers (questions and choices visible, but correct answers hidden)
-- ✅ View feedback after completing quiz
-- ✅ View their own attempt history
-- ❌ Cannot see correct answers while quiz is in progress
-- ❌ Cannot create or edit any content
+The `classes` app follows the same pattern through `TeacherOwnedViewSet`, whose `owner_filter`
+names the relation that reaches the owning teacher.
 
 ---
 
-## Key Design Patterns
+## Known gaps
 
-### 1. **Soft Question Reusability**
-Questions are stored in a QuestionBank and linked to Quizzes via QuizQuestion. This allows:
-- Same question to appear in multiple quizzes
-- Question order to be customized per quiz
-- Efficient question reuse and management
+Not yet implemented. Listed so this document doesn't drift into describing intentions as facts.
 
-### 2. **Role-Based Serializers**
-Different serializers for Teachers vs Students:
-- **ChoiceWriteSerializer** (Teachers): Includes `is_correct`
-- **ChoiceReadSerializer** (Students): Hides `is_correct`
-- **QuestionTeacherSerializer**: Full details
-- **QuestionStudentSerializer**: Limited to needed fields
-- **QuizDetailTeacherSerializer**: Includes all questions with answers
-- **QuizDetailStudentSerializer**: Only questions, no answers
-
-### 3. **Auto-Calculated Fields**
-`AnswerResponse.is_correct` is automatically calculated from the selected choice, ensuring data consistency.
-
-### 4. **Module-Based Feedback**
-Feedback is generated per-module, allowing targeted feedback on specific topics rather than just a single overall score.
-
-### 5. **Flexible Feedback Sources**
-Feedback can come from:
-- **Rule-based**: Teacher-defined rules (deterministic)
-- **LLM**: AI-generated (intelligent, personalized)
-
----
-
-## Frontend Considerations
-
-### Key Screens for Frontend Design
-
-**For Students:**
-1. **Quiz List** - Browse available quizzes by topic
-2. **Quiz Start** - Confirm start, show quiz title/description
-3. **Quiz Taking Interface** - Display questions one-by-one or all, show progress
-4. **Quiz Submission** - Confirm submission, show summary
-5. **Feedback View** - Display per-module feedback and scores
-6. **Attempt History** - View previous attempts and feedback
-
-**For Teachers:**
-1. **Dashboard** - Overview of topics, quizzes, student activity
-2. **Topic Management** - Create/edit topics
-3. **Module Management** - Create hierarchical module structure
-4. **Question Bank** - Create/edit/delete questions with choices
-5. **Quiz Builder** - Create quizzes by selecting questions
-6. **Feedback Rules** - Define score-based feedback rules
-7. **Class Analytics** - View student performance, attempt data
-
----
-
-## Summary of Model Relationships
-
-```
-┌─────────────────────────────────────────────────────┐
-│                      USER                           │
-│  (Teacher or Student)                              │
-└────┬───────────┬────────┬───────────────┬───────────┘
-     │           │        │               │
-     ├─creates→  │        │               │
-     │      TOPIC│        │               │
-     │           ├─has→   │               │
-     │           │   QUESTIONBANK         │
-     │           │        │               │
-     │           │        ├─contains→    │
-     │           │        │   QUESTION ──┼──┼──┼──→  MODULE
-     │           │        │        │     │  │  │
-     │           │        │        │     │  │  └─→ CHOICE
-     │           │        │        │     │  │
-     │           │        └─uses──→│     │  │
-     │           │            QUIZ ──┼──│──┼──→ QUIZQUESTION
-     │           │            │     │  │  │
-     │           │            └────→  │  │
-     │           │                    │  │
-     └────starts→ QUIZATTEMPT ←───answers─ ANSWERRESPONSE
-                  │
-                  └─generates→ FEEDBACKRESULT
-                               │
-                               ├─matched from→ FEEDBACKRULE ←creates─ User
-                               └─covers→ MODULE
-```
-
----
-
-## Database Schema Summary
-
-| App | Model | Purpose |
-|-----|-------|---------|
-| accounts | User | Authentication and role management |
-| quizzes | Topic | Course/subject grouping |
-| quizzes | Module | Hierarchical topic organization |
-| quizzes | QuestionBank | Container for all questions in a topic |
-| quizzes | Question | Individual assessment items |
-| quizzes | Choice | Answer options for questions |
-| quizzes | Quiz | Collection of questions for assessment |
-| quizzes | QuizQuestion | Junction table linking Quiz and Question |
-| attempts | QuizAttempt | Student's quiz submission |
-| attempts | AnswerResponse | Student's answer to a question |
-| feedback | FeedbackRule | Teacher-defined feedback templates |
-| feedback | FeedbackResult | Generated feedback for a student |
-
----
-
-## Important Implementation Notes
-
-1. **Cascading Deletes**: Most models cascade delete on User, so deleting a teacher deletes all their content.
-
-2. **Ordering**: Questions within a quiz maintain order via QuizQuestion.order, and feedback results are ordered by module and score range.
-
-3. **Answer Validation**: The `AnswerResponse.save()` method automatically validates answers by checking choice correctness.
-
-4. **JWT Authentication**: All endpoints use JWT tokens. Students can only see their own attempts; teachers can see all attempts.
-
-5. **Timeline**: Attempts track `started_at` and `submitted_at`, allowing the system to know which quizzes are in-progress vs. completed.
-
-6. **Module Hierarchy**: Modules can have parents, creating a tree structure for organizing course content hierarchically.
-
-This architecture supports scalability, role-based access, flexible question management, and intelligent feedback generation.
-
+- **No due dates or attempt limits.** `QuizAssignment` records only the target and `assigned_at`;
+  a student may take an assigned quiz an unlimited number of times (each submission ends one
+  attempt, and starting again creates a new one). Both are additive nullable fields when wanted.
+- **Question ordering within a quiz is client-driven.** `reorder` sets positions atomically but
+  nothing prevents two teachers racing on the same quiz.
+- **No `Choice` ordering.** Choices render in insertion order; there is no `order` field.
+- **`SECRET_KEY` falls back to a hardcoded value** when `DJANGO_SECRET_KEY` is unset. Fine for local
+  development, must be set in any deployment.
+- **CORS is still configured** for `http://localhost:3000`. Under the planned BFF the browser talks
+  only to same-origin Next route handlers, making `corsheaders` removable rather than merely
+  outdated.
+- **No rate limiting** on login or registration.
