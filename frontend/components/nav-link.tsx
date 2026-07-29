@@ -1,0 +1,46 @@
+"use client";
+
+import type { Route } from "next";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+import { cn } from "@/lib/cn";
+
+/**
+ * A header nav item that knows whether it is current.
+ *
+ * `usePathname` is a hook, so this leaf is a Client Component while the header
+ * around it stays on the server. That is the whole reason it is its own file —
+ * putting the directive on the layout would ship the user lookup to the browser.
+ */
+export function NavLink({
+  href,
+  children,
+  exact = false,
+}: {
+  href: Route;
+  children: React.ReactNode;
+  /** Match the path exactly. Use for "/teacher", which is a prefix of every other tab. */
+  exact?: boolean;
+}) {
+  const pathname = usePathname();
+  const active = exact ? pathname === href : pathname.startsWith(href);
+
+  return (
+    <Link
+      href={href}
+      // aria-current is what tells a screen reader which tab is active; the
+      // background colour alone conveys nothing to one.
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "rounded-md px-3 py-2 transition-colors",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        active
+          ? "bg-secondary text-secondary-foreground"
+          : "hover:bg-secondary/50 hover:text-foreground",
+      )}
+    >
+      {children}
+    </Link>
+  );
+}
