@@ -10,7 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 import os
+from datetime import timedelta
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -23,13 +25,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-!jqbw&k(2=oslwjn!2-+2ij+a1zv7eir9twa%*hxtleti^zly%'
+# Read from the environment like the POSTGRES_* settings below. The fallback exists so
+# a fresh clone runs without a .env; it is only reached in DEBUG and must never be the
+# value in a deployed environment.
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-!jqbw&k(2=oslwjn!2-+2ij+a1zv7eir9twa%*hxtleti^zly%",
+)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes")
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    host for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if host
+]
+if DEBUG and not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 
 # Application definition
@@ -48,13 +58,13 @@ INSTALLED_APPS = [
     'quizzes',
     'feedback',
     'attempts',
+    'classes',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # must sit high, before CommonMiddleware
-    'django.middleware.security.SecurityMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -63,8 +73,12 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Vite dev server default
+    "http://localhost:3000",  # Next.js dev server
 ]
+# Transitional. Under the planned BFF the browser only ever talks to same-origin
+# route handlers on :3000, which forward to Django server-to-server — a hop CORS does
+# not apply to. Once the frontend proxies everything, this setting and `corsheaders`
+# can be removed rather than corrected.
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -74,9 +88,12 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    # Every list response is {count, next, previous, results} — not a bare array.
+    # Unpaginated list endpoints returned whole tables, and the bank contents screen
+    # is explicitly a search over a large question list.
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 25,
 }
-
-from datetime import timedelta
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=2),
