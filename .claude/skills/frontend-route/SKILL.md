@@ -65,11 +65,14 @@ Four rules that follow:
   filter client-side — filtering in JSX doesn't remove the field from the payload.
 - Pass **narrowed props**, not whole API objects, into Client Components: `<Choices items={...}/>`
   with `{ id, text }` only.
-- **Give the two shapes two types.** The backend's teacher/student serializer split is the security
-  boundary; mirror it in `lib/types.ts` as `TeacherChoice` (has `is_correct`, `feedback_text`) and
-  `StudentChoice` (has neither). A Client Component that declares `props: { choices: StudentChoice[] }`
-  then *cannot* be handed the teacher shape — the build fails instead of the answer key leaking.
-  This is the main reason the project is in TypeScript.
+- **Use the two types in `lib/types.ts`.** `TeacherChoice` has `is_correct` and `feedback_text`;
+  `StudentChoice` declares them as **`?: never`**. That is not decorative and must not be
+  "simplified" away: TypeScript is structurally typed, so a `StudentChoice` defined merely as
+  `{ id, text }` would happily accept a `TeacherChoice` — a wider object satisfies a narrower type.
+  The optional-never members are what make `is_correct: boolean` fail to satisfy
+  `is_correct?: undefined`, so a component declaring `choices: StudentChoice[]` genuinely cannot be
+  handed the teacher shape. `lib/types.guard.ts` asserts this and fails `npm run typecheck` if the
+  guard is removed. This is the main reason the project is in TypeScript.
 - Keep any module that talks to Django `import 'server-only'` so it can never be pulled into a
   client bundle.
 
