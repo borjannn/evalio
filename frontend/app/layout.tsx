@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Space_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Inter is a variable font, so it needs no `weight` — Guidelines §3 asks for
+// 400/500/600 and the variable axis covers all three. Space Mono is not
+// variable, so its weights must be listed explicitly.
+const inter = Inter({
   subsets: ["latin"],
+  variable: "--font-inter",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const spaceMono = Space_Mono({
+  weight: ["400", "700"],
   subsets: ["latin"],
+  variable: "--font-space-mono",
 });
 
 export const metadata: Metadata = {
@@ -23,8 +27,13 @@ export const metadata: Metadata = {
 // It is global on purpose — do not import it.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+    <html lang="en" className={`${inter.variable} ${spaceMono.variable}`}>
+      {/* The page ground is neutral-50, not --color-background. Cards are white
+          and lift off the ground by value alone, which is what lets the design
+          hold to "zero decorative drop-shadows" (Guidelines §1). */}
+      <body className="min-h-screen bg-neutral-50 font-sans text-foreground antialiased">
+        {children}
+      </body>
     </html>
   );
 }
