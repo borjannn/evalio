@@ -11,9 +11,9 @@
 export default function Loading() {
   return (
     <div className="space-y-4" aria-hidden="true">
-      <div className="h-5 w-20 animate-pulse rounded-md bg-secondary" />
-      <div className="h-9 w-64 animate-pulse rounded-md bg-secondary" />
-      <div className="h-5 w-96 max-w-full animate-pulse rounded-md bg-secondary" />
+      <div className="h-5 w-20 skeleton rounded-md" />
+      <div className="h-9 w-64 skeleton rounded-md" />
+      <div className="h-5 w-96 max-w-full skeleton rounded-md" />
       <span className="sr-only">Loading…</span>
     </div>
   );

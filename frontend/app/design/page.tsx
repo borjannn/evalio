@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardFooter } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { PageLoader, Skeleton } from "@/components/ui/loader";
+
+import { ErrorPreview } from "./error-preview";
 
 /**
  * Internal reference — renders every token and every shared primitive so a
@@ -145,6 +148,29 @@ export default function DesignSystemCheck() {
             </Button>
           }
         />
+      </Section>
+
+      <Section title="Loading">
+        <p className="text-sm text-muted-foreground">
+          Skeletons where the layout is known, the tracing mark where it isn&apos;t. These are the
+          only looping animations in the app, and the only ones that remove themselves.
+        </p>
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-3">
+            <Skeleton className="h-9 w-40" />
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-2/3" />
+          </div>
+          <PageLoader label="Getting your quiz ready…" className="py-6" />
+        </div>
+      </Section>
+
+      <Section title="Error">
+        <p className="text-sm text-muted-foreground">
+          The mark breaks in its own shape rather than falling back to a warning triangle. It jolts
+          once and settles — an error stays on screen, so it must not loop.
+        </p>
+        <ErrorPreview />
       </Section>
 
       <Section title="Card footer">

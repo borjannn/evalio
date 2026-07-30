@@ -74,8 +74,13 @@
    Everything animates `transform` and `opacity` only (plus stroke-dashoffset,
    which the compositor also handles), so nothing triggers layout.
 
-   Every animation below is one-shot. Nothing loops — a perpetual animation in a
-   tool a teacher keeps open all day is noise, not polish.
+   Almost every animation below is one-shot. A perpetual animation in a tool a
+   teacher keeps open all day is noise, not polish.
+
+   The **loading** animations are the deliberate exception, and the exception is
+   narrow: a progress indicator has to loop, because a still one claims the work
+   has stopped. They are also the only animations that remove themselves — the
+   moment data lands the element unmounts. Nothing that stays on screen loops.
    --------------------------------------------------------------------------- */
 
 @keyframes evalio-draw {
@@ -109,6 +114,79 @@
   }
 }
 
+/* Loading: the mark draws itself, holds, then unwinds the way it came. One
+   continuous gesture rather than a spinner, so the thing you wait on is the
+   brand rather than a generic circle.
+
+   Going 1 → 0 → -1 is what makes the erase run in the same direction as the
+   draw. Stopping at 0 and restarting at 1 would snap. */
+@keyframes evalio-trace {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  45% {
+    stroke-dashoffset: 0;
+  }
+  55% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -1;
+  }
+}
+
+/* The mark breathes very slightly under the trace. 0.04 of scale is barely
+   perceptible on its own and is what stops the loop reading as mechanical. */
+@keyframes evalio-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+
+/* A light sweep across a skeleton block. Preferred over `animate-pulse`: a
+   moving highlight reads as "arriving", a fading one reads as "disabled". */
+@keyframes evalio-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Error: the mark snaps in and settles, once. Deliberately not a loop — an
+   error stays on screen until it is dealt with, and a repeating shudder would
+   be the definition of noise. */
+@keyframes evalio-jolt {
+  0% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-5px);
+  }
+  30% {
+    transform: translateX(4px);
+  }
+  45% {
+    transform: translateX(-3px);
+  }
+  60% {
+    transform: translateX(2px);
+  }
+  75% {
+    transform: translateX(-1px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
 @layer components {
   /* Stroke-drawn logo geometry. `pathLength="1"` on the SVG element normalises
      every shape to a length of 1, so one dasharray works for both the ring and
@@ -130,6 +208,46 @@
   .page-enter {
     animation: evalio-fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
+
+  /* --- Loading -------------------------------------------------------- */
+
+  /* Same `pathLength="1"` trick as `.logo-stroke`, looped. Each shape sets its
+     own `animation-delay` inline so the check trails the ring. */
+  .logo-trace {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: evalio-trace 1.8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+
+  .logo-breathe {
+    animation: evalio-breathe 1.8s ease-in-out infinite;
+  }
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--color-secondary);
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, white 70%, transparent),
+      transparent
+    );
+    animation: evalio-shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* --- Error ---------------------------------------------------------- */
+
+  .logo-jolt {
+    animation: evalio-jolt 0.5s ease-out 0.15s both;
+  }
 }
 
 /* Mandatory, not a nicety. Everything above collapses to its finished state —
@@ -137,15 +255,26 @@
 @media (prefers-reduced-motion: reduce) {
   .logo-stroke,
   .logo-letter,
-  .page-enter {
+  .page-enter,
+  .logo-trace,
+  .logo-breathe,
+  .logo-jolt {
     animation: none;
   }
 
-  .logo-stroke {
+  .logo-stroke,
+  .logo-trace {
     stroke-dashoffset: 0;
   }
 
   .logo-letter {
     opacity: 1;
+  }
+
+  /* The sweep is removed rather than frozen — a highlight parked mid-block
+     would read as a rendering fault. The block keeps its fill, so a skeleton
+     still says "something is coming" without moving. */
+  .skeleton::after {
+    content: none;
   }
 }

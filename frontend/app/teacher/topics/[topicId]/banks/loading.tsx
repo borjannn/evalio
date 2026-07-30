@@ -2,10 +2,10 @@
 export default function Loading() {
   return (
     <div className="space-y-6" aria-hidden="true">
-      <div className="h-5 w-32 animate-pulse rounded-md bg-secondary" />
-      <div className="h-9 w-64 animate-pulse rounded-md bg-secondary" />
-      <div className="h-16 animate-pulse rounded-xl bg-secondary" />
-      <div className="h-16 animate-pulse rounded-xl bg-secondary" />
+      <div className="h-5 w-32 skeleton rounded-md" />
+      <div className="h-9 w-64 skeleton rounded-md" />
+      <div className="h-16 skeleton rounded-xl" />
+      <div className="h-16 skeleton rounded-xl" />
       <span className="sr-only">Loading question banks…</span>
     </div>
   );

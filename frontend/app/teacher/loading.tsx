@@ -12,8 +12,8 @@ export default function Loading() {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <div className="h-9 w-40 animate-pulse rounded-md bg-secondary" />
-        <div className="h-5 w-80 animate-pulse rounded-md bg-secondary" />
+        <div className="h-9 w-40 skeleton rounded-md" />
+        <div className="h-5 w-80 skeleton rounded-md" />
       </div>
 
       <div
@@ -23,12 +23,12 @@ export default function Loading() {
         {[0, 1, 2].map((i) => (
           <div key={i} className="rounded-xl border border-border bg-white">
             <div className="space-y-3 p-5">
-              <div className="h-6 w-2/3 animate-pulse rounded-md bg-secondary" />
-              <div className="h-4 w-full animate-pulse rounded-md bg-secondary" />
+              <div className="h-6 w-2/3 skeleton rounded-md" />
+              <div className="h-4 w-full skeleton rounded-md" />
             </div>
             <div className="flex gap-3 border-t border-border px-5 py-4">
-              <div className="h-6 w-20 animate-pulse rounded-sm bg-secondary" />
-              <div className="h-6 w-20 animate-pulse rounded-sm bg-secondary" />
+              <div className="h-6 w-20 skeleton rounded-sm" />
+              <div className="h-6 w-20 skeleton rounded-sm" />
             </div>
           </div>
         ))}

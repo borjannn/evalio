@@ -1,9 +1,8 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
 import { useEffect } from "react";
 
-import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/error-state";
 
 /**
  * `error.tsx` must be a Client Component — React needs an error boundary, and
@@ -11,12 +10,11 @@ import { Button } from "@/components/ui/button";
  *
  * The commonest cause here in development is Django not running: `lib/api.ts`
  * throws on the fetch, which lands in this boundary rather than as a 500 page.
+ * The copy names that, because it is the fix nine times out of ten locally.
  *
- * `error.message` is deliberately not rendered. In production Next replaces it
- * with a generic digest anyway, and an API error can carry backend detail that
- * shouldn't reach a browser.
+ * ⚠️ `error.message` is not rendered — see `ErrorState`.
  */
-export default function Error({
+export default function TeacherError({
   error,
   reset,
 }: {
@@ -24,23 +22,15 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("Teacher dashboard failed to render:", error);
+    console.error("Teacher screen failed to render:", error);
   }, [error]);
 
   return (
-    <div className="rounded-xl border border-dashed border-border bg-white py-24 text-center">
-      <div className="mb-4 inline-flex size-12 items-center justify-center rounded-full bg-red-50 text-red-600">
-        <AlertTriangle size={24} />
-      </div>
-      <h2 className="text-lg font-medium">Couldn&apos;t load your topics</h2>
-      <p className="mx-auto mt-1 mb-6 max-w-sm text-sm text-muted-foreground">
-        Something went wrong talking to the server. If this is a local setup, check that Django is
-        running on port 8000.
-      </p>
-      <Button onClick={reset}>Try again</Button>
-      {error.digest && (
-        <p className="mt-4 font-mono text-xs text-muted-foreground">ref: {error.digest}</p>
-      )}
-    </div>
+    <ErrorState
+      title="Couldn't load this page"
+      description="Something went wrong talking to the server. Nothing you've saved is affected. If you're running Evalio locally, check that Django is up on port 8000."
+      reset={reset}
+      digest={error.digest}
+    />
   );
 }

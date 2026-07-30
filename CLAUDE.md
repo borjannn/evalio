@@ -156,12 +156,22 @@ only as *semantic* status (Published/Draft, destructive), never as decoration.
 the feedback screen. Adding a `tone` to a component that a student sees mid-quiz breaks the core
 content rule.
 
-**Motion is CSS keyframes in `globals.css`, not a library.** All of it is one-shot load-in
+**Motion is CSS keyframes in `globals.css`, not a library.** Most of it is one-shot load-in
 (`logo-stroke`, `logo-letter`, `page-enter`), which `animation-delay` cascades already do — Motion
-or GSAP would add ~30kB to reach the same place. Nothing loops: a perpetual animation in a tool a
-teacher keeps open all day is noise. Every animation is mirrored in a
+or GSAP would add ~30kB to reach the same place. Every animation is mirrored in a
 `@media (prefers-reduced-motion: reduce)` block that collapses it to its finished state; that block
 is mandatory, not a nicety.
+
+**Only loading indicators loop** (`logo-trace`, `logo-breathe`, `skeleton`). A still progress
+indicator claims the work has stopped, and these are the only animations that remove themselves —
+the element unmounts the moment data lands. Nothing that *stays* on screen may loop, which is why
+the error mark (`logo-jolt`) settles after one pass.
+
+Loading and error states are `components/ui/loader.tsx` and `components/error-state.tsx`. Use
+`<Skeleton>` where the layout is known ahead of time and `<PageLoader>` where it isn't.
+⚠️ **`reset()` alone does not recover a Server Component failure** — it re-renders the boundary's
+children against the same cached RSC payload and lands straight back on the error. `ErrorState`
+calls `router.refresh()` *and* `reset()` inside one transition; don't "simplify" it back.
 
 Interaction feedback is a CSS `transition` on the component, always with
 `motion-reduce:transition-none`. ⚠️ **Tailwind v4 compiles `scale-*` to the standalone `scale`
