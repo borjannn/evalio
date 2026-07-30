@@ -1,13 +1,13 @@
 "use client";
 
 import { AlertTriangle, ChevronRight, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useActionState, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input, Label } from "@/components/ui/field";
+import { Input, Label, selectOnMount } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
 import type {
   QuestionBank,
@@ -16,7 +16,8 @@ import type {
   TeacherQuestionWithUsage,
 } from "@/lib/types";
 
-import { deleteQuestion, renameBank } from "./actions";
+import { renameBank, type BankFormState } from "../actions";
+import { deleteQuestion } from "./actions";
 import { QuestionForm } from "./question-form";
 
 /**
@@ -43,6 +44,19 @@ export function BankScreen({
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
 
+  // Bank names are unique per topic, so renaming can fail with a 400 that has to
+  // be shown. The old version closed the form in `onSubmit` and would have
+  // swallowed it.
+  const [renameState, renameAction, renamePending] = useActionState<BankFormState, FormData>(
+    renameBank,
+    { error: null },
+  );
+  const [seenRename, setSeenRename] = useState(renameState);
+  if (renameState !== seenRename) {
+    setSeenRename(renameState);
+    if (renameState.ok) setRenaming(false);
+  }
+
   const term = query.trim().toLowerCase();
   const visible = bank.questions.filter(
     (question) =>
@@ -53,21 +67,33 @@ export function BankScreen({
   return (
     <div className="space-y-6">
       {renaming ? (
-        <form
-          action={renameBank}
-          onSubmit={() => setRenaming(false)}
-          className="flex max-w-md items-end gap-3"
-        >
+        <form action={renameAction} className="max-w-md space-y-1.5">
           <input type="hidden" name="id" value={bank.id} />
           <input type="hidden" name="topic" value={topicId} />
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="bank-name">Bank name</Label>
-            <Input id="bank-name" name="name" defaultValue={bank.name} autoFocus required />
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="bank-name">Bank name</Label>
+              <Input
+                id="bank-name"
+                name="name"
+                defaultValue={renameState.name ?? bank.name}
+                ref={selectOnMount}
+                autoFocus
+                required
+              />
+            </div>
+            <Button type="submit" disabled={renamePending}>
+              {renamePending ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="secondary" onClick={() => setRenaming(false)}>
+              Cancel
+            </Button>
           </div>
-          <Button type="submit">Save</Button>
-          <Button variant="secondary" onClick={() => setRenaming(false)}>
-            Cancel
-          </Button>
+          {renameState.error && (
+            <p role="alert" aria-live="polite" className="text-sm text-red-600">
+              {renameState.error}
+            </p>
+          )}
         </form>
       ) : (
         <div className="flex items-start justify-between gap-4">

@@ -77,6 +77,39 @@ class QuestionBankTests(APITestCase):
             "/api/question-banks/", {"topic": self.topic.id, "name": "Devices"}, format="json"
         )
         self.assertEqual(response.status_code, 400)
+        # The message is user-facing copy shown verbatim in the bank list, not a
+        # developer diagnostic — DRF's default names the database columns.
+        self.assertIn(
+            "You already have a bank with that name in this topic.",
+            str(response.data),
+        )
+
+    def test_renaming_a_bank_to_a_sibling_name_is_rejected(self):
+        # PATCH sends `name` alone; the validator has to fill `topic` from the
+        # instance for the collision to be seen at all.
+        self.client.force_authenticate(self.teacher)
+        other = QuestionBank.objects.create(topic=self.topic, name="Storage")
+        response = self.client.patch(
+            f"/api/question-banks/{other.id}/", {"name": "Devices"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_renaming_a_bank_to_its_own_name_is_allowed(self):
+        # The validator must exclude the instance, or saving an unchanged name
+        # would read as a collision with itself.
+        self.client.force_authenticate(self.teacher)
+        response = self.client.patch(
+            f"/api/question-banks/{self.bank.id}/", {"name": "Devices"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_the_same_bank_name_is_fine_in_a_different_topic(self):
+        self.client.force_authenticate(self.teacher)
+        other_topic = Topic.objects.create(name="Networking", created_by=self.teacher)
+        response = self.client.post(
+            "/api/question-banks/", {"topic": other_topic.id, "name": "Devices"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201)
 
     def test_owner_can_delete_their_bank(self):
         self.client.force_authenticate(self.teacher)
@@ -375,3 +408,68 @@ class QuestionReuseCountTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.question.refresh_from_db()
         self.assertEqual(self.question.text, "Edited?")
+
+
+class BankListAnnotationTests(APITestCase):
+    """The bank list's delete confirmation depends on `questions_in_use_count`.
+
+    Deleting a bank cascades to its questions, and QuizQuestion cascades from the
+    question — so the delete silently shortens every quiz built from the bank. The
+    warning is only trustworthy if the number is right.
+    """
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Storage")
+        self.questions = [
+            Question.objects.create(
+                question_bank=self.bank, text=f"Q{index}", created_by=self.teacher
+            )
+            for index in range(4)
+        ]
+
+    def _row(self):
+        response = self.client.get(f"/api/question-banks/?topic={self.topic.id}")
+        self.assertEqual(response.status_code, 200)
+        return next(row for row in response.data["results"] if row["id"] == self.bank.id)
+
+    def test_an_untouched_bank_reports_nothing_in_use(self):
+        row = self._row()
+        self.assertEqual(row["question_count"], 4)
+        self.assertEqual(row["questions_in_use_count"], 0)
+
+    def test_counts_are_not_multiplied_by_the_join(self):
+        # Two questions, each in three quizzes. The answer is 2, not 6 — and
+        # question_count must stay 4 rather than inflating alongside it.
+        for index in range(3):
+            quiz = Quiz.objects.create(
+                topic=self.topic, title=f"Quiz {index}", created_by=self.teacher
+            )
+            quiz.quizquestion_set.create(question=self.questions[0], order=0)
+            quiz.quizquestion_set.create(question=self.questions[1], order=1)
+
+        row = self._row()
+        self.assertEqual(row["question_count"], 4)
+        self.assertEqual(row["questions_in_use_count"], 2)
+
+    def test_another_teachers_bank_is_absent_from_the_list(self):
+        other = make_teacher("other")
+        other_topic = Topic.objects.create(name="Theirs", created_by=other)
+        QuestionBank.objects.create(topic=other_topic, name="Storage")
+
+        response = self.client.get("/api/question-banks/")
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertNotIn(other_topic.question_banks.get().id, ids)
+
+    def test_creating_a_bank_omits_the_annotations_rather_than_erroring(self):
+        # A freshly created instance carries no annotations. The fields are
+        # read_only, so DRF skips them instead of raising — the POST must still
+        # return 201 with a usable id, which is all the question form reads.
+        response = self.client.post(
+            "/api/question-banks/", {"topic": self.topic.id, "name": "Fresh"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("id", response.data)
+        self.assertNotIn("questions_in_use_count", response.data)

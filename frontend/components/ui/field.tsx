@@ -13,6 +13,25 @@ import { cn } from "@/lib/cn";
  * post anyway, so there is no extra identifier to invent.
  */
 
+/**
+ * Ref callback for an inline rename: focus the field and select what's in it, so
+ * typing replaces the current value instead of appending to it.
+ *
+ * `autoFocus` alone leaves the caret at the end, which is right for an empty
+ * "create" field and wrong for an "edit this name" one.
+ *
+ * Declared at module scope on purpose. React re-attaches a ref whose identity
+ * changed, so an inline arrow would re-select on every parent re-render — and it
+ * has to stay a plain function rather than `useCallback` to keep this module
+ * hook-free, which is what lets Server Components import it.
+ *
+ * `select()` focuses as a side effect; `autoFocus` stays on the callers as a
+ * belt-and-braces fallback.
+ */
+export function selectOnMount(node: HTMLInputElement | null): void {
+  node?.select();
+}
+
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return (
     <input

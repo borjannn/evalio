@@ -103,7 +103,21 @@ class QuestionBankViewSet(viewsets.ModelViewSet):
                     .order_by("created_at"),
                 )
             )
-        return queryset.annotate(question_count=Count("questions")).order_by("name")
+        # `questions_in_use_count` is what makes the delete confirmation concrete.
+        # Question.question_bank is CASCADE and QuizQuestion.question is CASCADE, so
+        # deleting a bank deletes its questions and silently pulls them out of every
+        # quiz built from them. The teacher has to be told that before confirming.
+        #
+        # distinct=True on both: the second join through quizzes multiplies the first,
+        # so a bank of 4 questions each used in 3 quizzes would report 12 questions.
+        return queryset.annotate(
+            question_count=Count("questions", distinct=True),
+            questions_in_use_count=Count(
+                "questions",
+                filter=Q(questions__quizzes__isnull=False),
+                distinct=True,
+            ),
+        ).order_by("name")
 
     def get_serializer_class(self):
         if self.action == "retrieve":

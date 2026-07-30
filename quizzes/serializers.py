@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.validators import UniqueTogetherValidator
 
 from .models import Choice, Question, QuestionBank, Quiz, QuizQuestion, Topic
 
@@ -190,11 +191,35 @@ class QuestionBankSerializer(serializers.ModelSerializer):
     """
 
     question_count = serializers.IntegerField(read_only=True)
+    # How many of those questions a quiz already references. Deleting the bank
+    # cascades to its questions and therefore removes them from those quizzes, so
+    # the bank list warns with this number before confirming — FRONTEND_PLAN §5.6.
+    questions_in_use_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = QuestionBank
-        fields = ("id", "topic", "name", "question_count", "created_at", "updated_at")
+        fields = (
+            "id", "topic", "name", "question_count", "questions_in_use_count",
+            "created_at", "updated_at",
+        )
         read_only_fields = ("created_at", "updated_at")
+        # Naming a bank something you already used is an ordinary mistake, not an
+        # exceptional one, so the message it produces is user-facing copy. DRF's
+        # default — "The fields topic, name must make a unique set." — names the
+        # database columns at a teacher. Declaring the validator explicitly
+        # replaces the auto-generated one.
+        #
+        # It still works for a rename, which PATCHes `name` alone: on update
+        # `UniqueTogetherValidator` fills the missing fields from the instance and
+        # excludes the instance itself, so renaming a bank to its current name is
+        # not a collision with itself.
+        validators = [
+            UniqueTogetherValidator(
+                queryset=QuestionBank.objects.all(),
+                fields=("topic", "name"),
+                message="You already have a bank with that name in this topic.",
+            )
+        ]
 
 
 class QuestionBankDetailSerializer(serializers.ModelSerializer):

@@ -124,17 +124,3 @@ export async function deleteQuestion(formData: FormData): Promise<void> {
   revalidatePath(`/teacher/topics/${topicId}/banks/${bankId}`);
   revalidatePath(`/teacher/topics/${topicId}`);
 }
-
-export async function renameBank(formData: FormData): Promise<void> {
-  await requireTeacher();
-
-  const id = Number(formData.get("id"));
-  const topicId = Number(formData.get("topic"));
-  const name = String(formData.get("name") ?? "").trim();
-  if (!Number.isInteger(id) || !name) return;
-
-  await apiPatch(`/question-banks/${id}/`, { name });
-  revalidatePath(`/teacher/topics/${topicId}/banks/${id}`);
-  revalidatePath(`/teacher/topics/${topicId}/banks`);
-  revalidatePath(`/teacher/topics/${topicId}`);
-}

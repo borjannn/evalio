@@ -145,12 +145,25 @@ export type Topic = {
   updated_at: string;
 };
 
-/** `QuestionBankSerializer` — list shape, count instead of the questions. */
+/**
+ * `QuestionBankSerializer` — list shape, counts instead of the questions.
+ *
+ * `questions_in_use_count` is how many of them a quiz already references.
+ * Deleting a bank cascades to its questions and so shortens those quizzes; the
+ * bank list's delete confirmation says so with this number.
+ *
+ * ⚠️ Both counts are annotations added by `get_queryset()`, so they exist on
+ * list responses only. On the **create** response DRF skips them (a read-only
+ * field whose attribute is missing raises `SkipField`, it does not error), which
+ * makes this type slightly optimistic for a POST. Callers of `POST
+ * /question-banks/` read `id` and nothing else — keep it that way.
+ */
 export type QuestionBank = {
   id: number;
   topic: number;
   name: string;
   question_count: number;
+  questions_in_use_count: number;
   created_at: string;
   updated_at: string;
 };

@@ -236,6 +236,38 @@ CRUD on `topics`, `question-banks`, `questions`, `quizzes`, plus:
 roles and switches serializer by role. `?search=` is supported on topics (name, description), banks
 (name) and questions (text); banks accept `?topic=` and questions `?question_bank=`.
 
+#### Read-only count fields
+
+Teacher read shapes carry counts that come from `.annotate()` in `get_queryset()`, never from the
+model. They exist only on the actions listed here — which is why each lives on its own serializer
+subclass rather than as an optional field, since a serializer field whose attribute is missing
+raises instead of returning null.
+
+| Field | Serializer | Present on | Means |
+|---|---|---|---|
+| `quiz_count`, `question_bank_count` | `TopicSerializer` | topics list + retrieve | Size of the topic |
+| `question_count` | `QuestionBankSerializer` | banks **list** | Questions in the bank |
+| `questions_in_use_count` | `QuestionBankSerializer` | banks **list** | Of those, how many a quiz already references |
+| `quiz_usage_count` | `QuestionTeacherListSerializer` | questions list/retrieve, bank retrieve | Quizzes referencing the question |
+| `submitted_answer_count` | `QuestionTeacherListSerializer` | questions list/retrieve, bank retrieve | Answers on **submitted** attempts only |
+| `question_count`, `assignment_count` | `QuizTeacherListSerializer` | quizzes list, teacher only | Size and reach of the quiz |
+
+Two consequences worth knowing:
+
+- **Every one of these annotations needs `distinct=True`.** Two joins in one query multiply each
+  other's rows, so without it a quiz with 5 questions assigned to 3 classes reports 15 of each.
+- **`POST` responses omit them.** A freshly created instance has no annotation; the fields are
+  `read_only`, so DRF raises `SkipField` and drops them rather than erroring. Callers of
+  `POST /api/question-banks/` read `id` only.
+
+`questions_in_use_count` exists for the bank list's delete confirmation. `QuestionBank → Question`
+and `Question → QuizQuestion` are both `CASCADE`, so deleting a bank shortens every quiz built from
+it; the UI states that count before confirming.
+
+Bank names are unique per topic (`uniq_bank_name_per_topic`). `QuestionBankSerializer` declares the
+`UniqueTogetherValidator` explicitly to override DRF's default message — the text is shown verbatim
+to a teacher, so it must not name database columns.
+
 ### Classes — `classes/urls.py` (mounted at `/api/`)
 | Method | Path | Notes |
 |---|---|---|

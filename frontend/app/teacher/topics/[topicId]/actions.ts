@@ -75,14 +75,3 @@ export async function updateTopic(
   revalidatePath("/teacher");
   return { error: null, ok: true };
 }
-
-export async function createBank(formData: FormData): Promise<void> {
-  await requireTeacher();
-
-  const topicId = Number(formData.get("topic"));
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return;
-
-  await apiPost("/question-banks/", { topic: topicId, name });
-  revalidatePath(`/teacher/topics/${topicId}`);
-}
