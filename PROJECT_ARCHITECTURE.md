@@ -231,6 +231,7 @@ CRUD on `topics`, `question-banks`, `questions`, `quizzes`, plus:
 | POST | `/api/quizzes/{pk}/remove_question/` | `{ question_id }` |
 | POST | `/api/quizzes/{pk}/reorder/` | `{ question_ids: [...] }` — one atomic `bulk_update` |
 | GET | `/api/quizzes/{pk}/attempts/` | Attempts on the teacher's own quiz, with student and score |
+| GET | `/api/quizzes/{pk}/audience/` | Who the quiz's assignments reach. **Unpaginated** — a bare `{student_count, students}` |
 
 `topics`, `question-banks` and `questions` are teacher-only. `quizzes` list/retrieve serves both
 roles and switches serializer by role. `?search=` is supported on topics (name, description), banks
@@ -277,6 +278,24 @@ it; the UI states that count before confirming.
 Bank names are unique per topic (`uniq_bank_name_per_topic`). `QuestionBankSerializer` declares the
 `UniqueTogetherValidator` explicitly to override DRF's default message — the text is shown verbatim
 to a teacher, so it must not name database columns.
+
+#### Who a quiz reaches
+
+`quizzes/selectors.py` holds **both directions** of assignment resolution, deliberately adjacent:
+
+- `quizzes_assigned_to(student)` — the single definition of what a student may see. Used by the quiz
+  list, the quiz retrieve, and the attempt-start check.
+- `assignment_audience(quiz)` — its inverse, behind `/api/quizzes/{pk}/audience/`. Returns
+  `[(student, [route, ...])]`, deduplicated: a student in an assigned class who is *also* named
+  individually appears once with both routes.
+
+If one gains a targeting route the other must too, or the assign screen promises a reach the runtime
+doesn't honour. `classes/tests.py` asserts the two agree on the same student set.
+
+The audience powers two things on the assign screen (FRONTEND_PLAN §5.8): the running total, and
+marking an individual "already covered via 5B" so naming them can't silently no-op. It deliberately
+**ignores `is_published`** — reach is a property of the assignments; whether the quiz is a draft is a
+separate fact the screen states separately.
 
 ### Classes — `classes/urls.py` (mounted at `/api/`)
 | Method | Path | Notes |
@@ -378,10 +397,15 @@ Not yet implemented. Listed so this document doesn't drift into describing inten
 - **Question ordering within a quiz is client-driven.** `reorder` sets positions atomically but
   nothing prevents two teachers racing on the same quiz.
 - **No `Choice` ordering.** Choices render in insertion order; there is no `order` field.
-- **Drag-to-reorder in the quiz builder is untested by automation.** The keyboard path (focus the
-  grip, arrow keys) is verified end to end and shares all the reorder logic, but synthetic mouse
-  events don't fire native HTML5 drag events, so the `dragstart`/`dragover`/`drop` wiring has only
-  been read, not exercised.
+- **⚠️ No route from registration onto a first roster.** `students_visible_to` scopes the directory
+  search to students *already enrolled in one of the searching teacher's classes*, which is what
+  stops any teacher account enumerating every student in the system. The consequence is a
+  chicken-and-egg: a freshly registered student matches nobody's search, so no teacher can enroll
+  them, so they stay invisible. Today only Django admin can create the first enrolment. The roster's
+  add-students panel says so rather than looking broken. Fixing it properly needs a deliberate
+  mechanism — a class join code students redeem, an invite by exact-username match, or an
+  admin-assigned teacher/school relation — each with a different exposure profile. Do not "fix" it
+  by widening the search scope.
 - **`SECRET_KEY` falls back to a hardcoded value** when `DJANGO_SECRET_KEY` is unset. Fine for local
   development, must be set in any deployment.
 - **CORS is still configured** for `http://localhost:3000`. Under the planned BFF the browser talks

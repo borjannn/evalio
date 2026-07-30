@@ -179,6 +179,11 @@ modules to `lib/` (`lib/question-actions.ts`, `lib/actions.ts`), shared componen
 control, not the whole form — the question form's shared-question warning once made backing out of
 an edit impossible without first accepting the warning.
 
+**A `"use server"` module may export only async functions.** An `export const` beside a Server
+Function is a build error that neither `tsc` nor eslint reports, because it is a bundler rule — it
+only surfaces when the route is actually requested. Shared constants go in `lib/constants.ts`
+(mirrored backend values) or `lib/cookies.ts`, never in an actions file.
+
 Lint with `npm run lint` and typecheck with `npm run typecheck` in `frontend/`.
 
 ## Linting
@@ -188,7 +193,7 @@ Frontend: `npm run lint` and `npm run typecheck` from `frontend/`.
 
 ## Testing
 
-85 tests across five apps. Run the suite before finishing any backend change.
+94 tests across five apps. Run the suite before finishing any backend change.
 
 ```
 python manage.py test              # needs the database up, same as any other management command
@@ -203,7 +208,9 @@ python manage.py test attempts     # one app
   2-question and an 8-question quiz cost the **same** number of queries, not an exact count — an
   exact number breaks on any unrelated change, and the invariant that matters is "doesn't grow".
 - `classes/tests.py` — the assignment target constraints (including the partial unique indexes),
-  assignment resolution through class and group, and scoped student search.
+  assignment resolution through class and group, scoped student search, and that
+  `assignment_audience` (who a quiz reaches) agrees with `quizzes_assigned_to` (what a student may
+  see) on the same student set. Those two are inverses and must not drift.
 - `attempts/tests.py` — the full lifecycle: assignment-gated start, resume rather than duplicate,
   correctness withheld, snapshots written, cross-student isolation.
 - `accounts/tests.py` — registration cannot grant the teacher role.

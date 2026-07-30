@@ -10,6 +10,16 @@ from .models import Class, Enrollment, GroupMembership, QuizAssignment, Teaching
 User = get_user_model()
 
 
+def make_teacher(username="teacher"):
+    return User.objects.create_user(username=username, password="pw", role=User.Role.TEACHER)
+
+
+def make_student(username="student", last_name=""):
+    return User.objects.create_user(
+        username=username, password="pw", role=User.Role.STUDENT, last_name=last_name
+    )
+
+
 class AssignmentTargetConstraintTests(APITestCase):
     """The database enforces exactly one target — not just the serializer."""
 
@@ -213,3 +223,148 @@ class StudentSearchTests(APITestCase):
     def test_students_cannot_search(self):
         self.client.force_authenticate(self.mine)
         self.assertEqual(self.client.get("/api/students/search/?q=alice").status_code, 403)
+
+
+class AssignmentAudienceTests(APITestCase):
+    """`GET /api/quizzes/{id}/audience/` — what the assign screen counts and labels.
+
+    It is the inverse of `quizzes_assigned_to`, and the two have to agree: a
+    student the screen promises will see the quiz must actually be able to start
+    it. These tests assert the same student set from both directions.
+    """
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.topic = Topic.objects.create(name="Maths", created_by=self.teacher)
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", created_by=self.teacher, is_published=True
+        )
+        self.school_class = Class.objects.create(
+            name="5B", school_year="2025/2026", created_by=self.teacher
+        )
+        self.students = [make_student(f"s{index}") for index in range(4)]
+        self.enrollments = [
+            Enrollment.objects.create(student=student, school_class=self.school_class)
+            for student in self.students
+        ]
+        self.group = TeachingGroup.objects.create(
+            school_class=self.school_class, topic=self.topic, teacher=self.teacher
+        )
+        # A strict subset of the class, as a real subject group is.
+        for enrollment in self.enrollments[:2]:
+            GroupMembership.objects.create(group=self.group, enrollment=enrollment)
+
+    def _audience(self):
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/audience/")
+        self.assertEqual(response.status_code, 200)
+        return response.data
+
+    def test_no_assignments_reaches_nobody(self):
+        data = self._audience()
+        self.assertEqual(data["student_count"], 0)
+        self.assertEqual(data["students"], [])
+
+    def test_a_class_assignment_reaches_the_whole_roster(self):
+        QuizAssignment.objects.create(
+            quiz=self.quiz, school_class=self.school_class, assigned_by=self.teacher
+        )
+        data = self._audience()
+        self.assertEqual(data["student_count"], 4)
+        self.assertEqual({row["via"][0] for row in data["students"]}, {"5B"})
+
+    def test_overlapping_targets_are_counted_once_and_list_both_routes(self):
+        """The screen's whole point: a class plus a member of it is 4, not 5."""
+        QuizAssignment.objects.create(
+            quiz=self.quiz, school_class=self.school_class, assigned_by=self.teacher
+        )
+        QuizAssignment.objects.create(
+            quiz=self.quiz, group=self.group, assigned_by=self.teacher
+        )
+        QuizAssignment.objects.create(
+            quiz=self.quiz, student=self.students[0], assigned_by=self.teacher
+        )
+
+        data = self._audience()
+        self.assertEqual(data["student_count"], 4)
+
+        by_id = {row["id"]: row for row in data["students"]}
+        # Reached three ways, still one row, and every route is named so the UI
+        # can say "already covered via 5B".
+        self.assertEqual(len(by_id[self.students[0].id]["via"]), 3)
+        self.assertIn("Named directly", by_id[self.students[0].id]["via"])
+        # In the class but not the group, and not named.
+        self.assertEqual(by_id[self.students[3].id]["via"], ["5B"])
+
+    def test_the_audience_matches_what_the_student_selector_allows(self):
+        QuizAssignment.objects.create(
+            quiz=self.quiz, group=self.group, assigned_by=self.teacher
+        )
+        from quizzes.selectors import quizzes_assigned_to
+
+        promised = {row["id"] for row in self._audience()["students"]}
+        actual = {
+            student.id
+            for student in self.students
+            if quizzes_assigned_to(student).filter(pk=self.quiz.pk).exists()
+        }
+        self.assertEqual(promised, actual)
+
+    def test_a_draft_quiz_still_reports_its_reach(self):
+        # "Who would this reach" is a property of the assignments. Whether it is
+        # published is a separate fact the screen states separately.
+        self.quiz.is_published = False
+        self.quiz.save()
+        QuizAssignment.objects.create(
+            quiz=self.quiz, school_class=self.school_class, assigned_by=self.teacher
+        )
+        self.assertEqual(self._audience()["student_count"], 4)
+
+    def test_another_teacher_cannot_read_the_audience(self):
+        other = make_teacher("other")
+        self.client.force_authenticate(other)
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/audience/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_audience_never_exposes_an_email(self):
+        QuizAssignment.objects.create(
+            quiz=self.quiz, school_class=self.school_class, assigned_by=self.teacher
+        )
+        for row in self._audience()["students"]:
+            self.assertNotIn("email", row)
+
+
+class RosterGroupBadgeTests(APITestCase):
+    """The roster shows which subject groups each student is in."""
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.school_class = Class.objects.create(
+            name="5B", school_year="2025/2026", created_by=self.teacher
+        )
+        self.maths = Topic.objects.create(name="Maths", created_by=self.teacher)
+        self.science = Topic.objects.create(name="Science", created_by=self.teacher)
+        self.student = make_student("only")
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, school_class=self.school_class
+        )
+
+    def test_a_student_in_no_group_reports_an_empty_list(self):
+        response = self.client.get(f"/api/enrollments/?school_class={self.school_class.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["group_names"], [])
+
+    def test_group_names_are_topic_names(self):
+        # Every group on one roster shares the class, so repeating "5B — " on each
+        # badge would be noise.
+        for topic in (self.maths, self.science):
+            group = TeachingGroup.objects.create(
+                school_class=self.school_class, topic=topic, teacher=self.teacher
+            )
+            GroupMembership.objects.create(group=group, enrollment=self.enrollment)
+
+        response = self.client.get(f"/api/enrollments/?school_class={self.school_class.id}")
+        self.assertEqual(
+            sorted(response.data["results"][0]["group_names"]), ["Maths", "Science"]
+        )

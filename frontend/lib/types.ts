@@ -256,6 +256,12 @@ export type Enrollment = {
   student: number;
   student_detail: StudentSummary;
   school_class: number;
+  /**
+   * Topic names of the subject groups this enrolment is in — the roster's
+   * per-student badges. Topic name only, because every group on one roster
+   * belongs to the same class.
+   */
+  group_names: string[];
   created_at: string;
 };
 
@@ -299,6 +305,25 @@ export type QuizAssignment = {
   target_label: string;
   assigned_by: number;
   assigned_at: string;
+};
+
+/**
+ * `GET /api/quizzes/{id}/audience/` — who the quiz's assignments reach.
+ *
+ * Deduplicated: a student in an assigned class who is *also* named individually
+ * appears once, with both routes in `via`. That is what lets the assign screen
+ * report a trustworthy total and mark an individual as "already covered via 5B"
+ * instead of silently no-opping the add.
+ *
+ * Unpaginated — a bare object, not `Paginated<T>`. `student_count` is the length
+ * of `students`, returned so the summary doesn't depend on the client counting.
+ *
+ * Ignores `is_published`; reach is a property of the assignments, and whether the
+ * quiz is a draft is stated separately.
+ */
+export type QuizAudience = {
+  student_count: number;
+  students: (StudentSummary & { via: string[] })[];
 };
 
 /* -------------------------------------------------------------------------- */

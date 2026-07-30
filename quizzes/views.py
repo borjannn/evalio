@@ -328,6 +328,34 @@ class QuizViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(TeacherAttemptListSerializer(page, many=True).data)
         return Response(TeacherAttemptListSerializer(queryset, many=True).data)
 
+    @action(detail=True, methods=["get"], permission_classes=[IsTeacher, IsOwner])
+    def audience(self, request, pk=None):
+        """GET /api/quizzes/{id}/audience/ — who this quiz's assignments reach.
+
+        The assign screen (FRONTEND_PLAN §5.8) needs the deduplicated total, and
+        needs to mark an individual who is already covered by an assigned class
+        with the reason. Both come from `assignment_audience`, the inverse of the
+        selector that decides what a student may see — see quizzes/selectors.py.
+
+        Unpaginated: the caller wants the whole set to diff a search against, and
+        one teacher's audience is a few classes' worth of students.
+        """
+        from classes.serializers import StudentSummarySerializer
+
+        from .selectors import assignment_audience
+
+        quiz = self.get_object()
+        rows = assignment_audience(quiz)
+        return Response(
+            {
+                "student_count": len(rows),
+                "students": [
+                    {**StudentSummarySerializer(student).data, "via": routes}
+                    for student, routes in rows
+                ],
+            }
+        )
+
     @action(detail=True, methods=["post"], permission_classes=[IsTeacher, IsOwner])
     def reorder(self, request, pk=None):
         """Set the order of every question in one atomic call.

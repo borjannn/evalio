@@ -31,11 +31,28 @@ class ClassSerializer(serializers.ModelSerializer):
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     student_detail = StudentSummarySerializer(source="student", read_only=True)
+    group_names = serializers.SerializerMethodField()
 
     class Meta:
         model = Enrollment
-        fields = ("id", "student", "student_detail", "school_class", "created_at")
+        fields = (
+            "id", "student", "student_detail", "school_class", "group_names", "created_at",
+        )
         read_only_fields = ("created_at",)
+
+    def get_group_names(self, obj):
+        """Subject groups this enrolment is in — the roster's per-student badges.
+
+        The topic name alone, not `str(group)`: every group on a roster belongs to
+        the same class, so repeating "5B — " on every badge is noise.
+
+        `EnrollmentViewSet` prefetches through to the topic. Without that this is
+        two queries per roster row.
+        """
+        return [
+            membership.group.topic.name
+            for membership in obj.group_memberships.all()
+        ]
 
     def validate_student(self, value):
         if not value.is_student:

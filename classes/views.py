@@ -70,7 +70,12 @@ class ClassViewSet(TeacherOwnedViewSet):
 
 
 class EnrollmentViewSet(TeacherOwnedViewSet):
-    queryset = Enrollment.objects.select_related("student", "school_class")
+    # The prefetch feeds `EnrollmentSerializer.get_group_names`, which draws the
+    # roster's per-student group badges. Without it a 30-student roster costs 60
+    # extra queries.
+    queryset = Enrollment.objects.select_related("student", "school_class").prefetch_related(
+        "group_memberships__group__topic"
+    )
     serializer_class = EnrollmentSerializer
     owner_filter = "school_class__created_by"
 
