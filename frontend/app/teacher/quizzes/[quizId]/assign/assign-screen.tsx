@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/field";
+import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/cn";
 import { MIN_SEARCH_LENGTH } from "@/lib/constants";
 import { searchStudents } from "@/lib/student-actions";
@@ -393,8 +394,7 @@ function CurrentAssignments({
   const icons = { class: Users, group: GraduationCap, student: User } as const;
 
   return (
-    <section className="space-y-3 border-t border-border pt-6">
-      <h2 className="text-lg font-semibold tracking-tight">Currently assigned</h2>
+    <Section title="Currently assigned" count={assignments.length}>
       <div className="space-y-2">
         {assignments.map((assignment) => {
           const Icon = icons[assignment.target_type];
@@ -426,7 +426,7 @@ function CurrentAssignments({
           );
         })}
       </div>
-    </section>
+    </Section>
   );
 }
 

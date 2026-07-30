@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
 import { ScoreBadge } from "@/components/ui/score-badge";
+import { Section } from "@/components/ui/section";
 import { ApiError, apiGet } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -103,10 +104,7 @@ export default async function AttemptDetailPage({
         </div>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">
-          The feedback this student was given
-        </h2>
+      <Section title="The feedback this student was given">
         <Card>
           <CardBody className="p-6">
             <p className="max-w-2xl text-base leading-relaxed whitespace-pre-line">
@@ -114,10 +112,9 @@ export default async function AttemptDetailPage({
             </p>
           </CardBody>
         </Card>
-      </section>
+      </Section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">Answers</h2>
+      <Section title="Answers" count={quiz.questions.length}>
         <ul className="space-y-3">
           {quiz.questions.map((question, index) => {
             const answer = answerByQuestion.get(question.id);
@@ -182,7 +179,7 @@ export default async function AttemptDetailPage({
         </ul>
 
         <OrphanedAnswers attempt={attempt} />
-      </section>
+      </Section>
     </div>
   );
 }

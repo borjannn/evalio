@@ -9,6 +9,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Label, selectOnMount } from "@/components/ui/field";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Section } from "@/components/ui/section";
 import { MIN_SEARCH_LENGTH } from "@/lib/constants";
 import { searchStudents } from "@/lib/student-actions";
 import type {
@@ -123,11 +124,7 @@ export function Roster({
         />
       )}
 
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Roster{" "}
-          <span className="font-normal text-muted-foreground">({enrollments.length})</span>
-        </h2>
+      <Section title="Roster" count={enrollments.length}>
 
         {enrollments.length === 0 ? (
           <EmptyState
@@ -157,17 +154,14 @@ export function Roster({
             </TBody>
           </Table>
         )}
-      </section>
+      </Section>
 
       {groups.length > 0 && (
-        <section className="space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">Subject groups</h2>
-            <p className="text-sm text-muted-foreground">
-              A group is a subset of this roster. Assigning a quiz to a group reaches only its
-              members.
-            </p>
-          </div>
+        <Section
+          title="Subject groups"
+          count={groups.length}
+          description="A group is a subset of this roster. Assigning a quiz to a group reaches only its members."
+        >
 
           {groups.map((group) => (
             <GroupRoster
@@ -178,7 +172,7 @@ export function Roster({
               memberships={memberships.filter((membership) => membership.group === group.id)}
             />
           ))}
-        </section>
+        </Section>
       )}
     </div>
   );
