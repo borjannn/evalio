@@ -232,6 +232,15 @@ CRUD on `topics`, `question-banks`, `questions`, `quizzes`, plus:
 | POST | `/api/quizzes/{pk}/reorder/` | `{ question_ids: [...] }` — one atomic `bulk_update` |
 | GET | `/api/quizzes/{pk}/attempts/` | Attempts on the teacher's own quiz, with student and score |
 | GET | `/api/quizzes/{pk}/audience/` | Who the quiz's assignments reach. **Unpaginated** — a bare `{student_count, students}` |
+| GET | `/api/quizzes/{pk}/results/` | The results screen's whole payload. **Unpaginated** — `{summary, questions, rows}` |
+
+`results/` is one endpoint for one screen. Its `rows` are a **roster, not an attempt log**: one per
+student the quiz reaches, with their latest attempt or null, so "not started" is a row rather than an
+absence. A student who has an attempt but is no longer assigned still gets a row with an empty
+`via` — withdrawing an assignment must not erase a result. `questions` carries per-question accuracy,
+scoped to attempts **on this quiz** (questions are shared by reference, so an unscoped count pools
+every quiz that uses one) and to **submitted** attempts only. `summary.mean_score_percent` is null
+rather than 0 when nobody has submitted.
 
 `topics`, `question-banks` and `questions` are teacher-only. `quizzes` list/retrieve serves both
 roles and switches serializer by role — teachers get `QuizTeacherListSerializer` / `QuizDetailTeacherSerializer`,
@@ -325,9 +334,25 @@ separate fact the screen states separately.
 |---|---|---|
 | GET | `/api/attempts/` | The requesting student's own attempts |
 | POST | `/api/attempts/start/` | `{ quiz_id }`; student only; requires an assignment |
-| GET | `/api/attempts/{pk}/` | Owner, or the quiz's teacher |
+| GET | `/api/attempts/{pk}/` | Owner, or the quiz's teacher. **Two shapes, switched by role** — see below |
 | POST | `/api/attempts/{attempt_id}/answer/` | `{ question_id, choice_id }`; rejected once submitted |
 | POST | `/api/attempts/{attempt_id}/submit/` | Locks the attempt and generates feedback |
+
+`GET /api/attempts/{pk}/` switches serializer on `is_teacher`, the same teacher/student split the
+rest of the app uses:
+
+- **Student** — `QuizAttemptSerializer` / `AnswerResponseSerializer`. Used to resume. `is_correct` is
+  null until `submitted_at` is set, and the snapshot fields are absent.
+- **Teacher** — `QuizAttemptTeacherSerializer` / `AnswerResponseTeacherSerializer`, for the §5.12
+  attempt review. This is the **only** serializer exposing `AnswerResponse`'s snapshots
+  (`question_text`, `choice_text`, `choice_feedback_text`), and it must never reach a student
+  endpoint: `choice_feedback_text` explains why a choice is wrong, so in practice only wrong choices
+  have one and it identifies the answer by elimination.
+
+The teacher shape reads the snapshots rather than the live `Question`/`Choice` on purpose. Answers
+are historical records; editing a question after an attempt was submitted must not rewrite what the
+screen says the student saw, and once a question is deleted the `SET_NULL` FK leaves the snapshot as
+the only surviving record. `attempts/tests.py::TeacherAttemptDetailTests` asserts both halves.
 
 ### Feedback — `feedback/urls.py`
 | Method | Path | Notes |
@@ -430,3 +455,8 @@ Not yet implemented. Listed so this document doesn't drift into describing inten
   topics, banks, questions or students sees the first 25 and nothing on screen says so. The student
   screens use `frontend/components/ui/pager.tsx`; the teacher dashboard, bank contents, roster and
   both picker panels still need it (FRONTEND_PLAN §9).
+- **`audience/` and `results/` are unpaginated.** Both return one row per student the quiz reaches,
+  deliberately: the assign screen diffs a search against the whole set, and a mean score computed
+  over page 1 would be a lie. Fine for a few classes, wrong for a school-wide cohort. Paginating
+  them needs the summary and the per-question stats to stay whole-set while only the rows page,
+  so it is a shape change rather than a flag.

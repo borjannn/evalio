@@ -250,7 +250,7 @@ Frontend: `npm run lint` and `npm run typecheck` from `frontend/`.
 
 ## Testing
 
-97 tests across five apps. Run the suite before finishing any backend change.
+109 tests across five apps. Run the suite before finishing any backend change.
 
 ```
 python manage.py test              # needs the database up, same as any other management command
@@ -263,7 +263,10 @@ python manage.py test attempts     # one app
 - `quizzes/tests.py` — ownership isolation, many-banks-per-topic, choice diffing on edit, atomic
   reorder, and both roles' count annotations — `StudentQuizListTests` covers the student list
   shape, including that a student reached by two assignment routes at once still sees the quiz
-  once with a true question count. The N+1 guard on the quiz detail asserts that a
+  once with a true question count. `QuizResultsTests` covers `/results/`: students who never
+  started still get a row, a submitted attempt survives its assignment being withdrawn, the mean is
+  null rather than zero before anyone submits, and per-question accuracy does **not** pool across
+  quizzes that share a question. The N+1 guard on the quiz detail asserts that a
   2-question and an 8-question quiz cost the **same** number of queries, not an exact count — an
   exact number breaks on any unrelated change, and the invariant that matters is "doesn't grow".
 - `classes/tests.py` — the assignment target constraints (including the partial unique indexes),
@@ -271,7 +274,9 @@ python manage.py test attempts     # one app
   `assignment_audience` (who a quiz reaches) agrees with `quizzes_assigned_to` (what a student may
   see) on the same student set. Those two are inverses and must not drift.
 - `attempts/tests.py` — the full lifecycle: assignment-gated start, resume rather than duplicate,
-  correctness withheld, snapshots written, cross-student isolation.
+  correctness withheld, snapshots written, cross-student isolation. `TeacherAttemptDetailTests`
+  covers the role switch on `/api/attempts/<pk>/`: the teacher shape carries the snapshots, the
+  student shape must not, and an edited choice must not rewrite a submitted answer.
 - `accounts/tests.py` — registration cannot grant the teacher role.
 
 If a test asserts a 404 where you expect 403, or asserts a field is *absent*, it is testing a

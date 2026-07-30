@@ -209,3 +209,75 @@ class TeacherResultsTests(AttemptLifecycleTestCase):
         self.assertEqual(
             self.client.get(f"/api/quizzes/{self.quiz.id}/attempts/").status_code, 404
         )
+
+
+class TeacherAttemptDetailTests(AttemptLifecycleTestCase):
+    """`GET /api/attempts/<pk>/` returns two different shapes, by role.
+
+    The teacher shape carries the answer snapshots, including
+    `choice_feedback_text`. That field is the teacher's explanation of why a
+    choice is wrong, so in practice only wrong choices have one — reaching a
+    student it would identify the correct answer by elimination. These tests are
+    the guard that the role switch, not luck, is what keeps them apart.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.assign()
+        self.attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        AnswerResponse.objects.create(
+            attempt=self.attempt, question=self.question, selected_choice=self.wrong
+        )
+
+    def submit(self):
+        from django.utils import timezone
+
+        self.attempt.submitted_at = timezone.now()
+        self.attempt.save()
+
+    def test_the_teacher_sees_the_snapshots(self):
+        self.submit()
+        self.client.force_authenticate(self.teacher)
+        response = self.client.get(f"/api/attempts/{self.attempt.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        answer = response.data["answers"][0]
+        self.assertEqual(answer["question_text"], "What?")
+        self.assertEqual(answer["choice_text"], "Wrong")
+        self.assertEqual(answer["choice_feedback_text"], "Because no.")
+        self.assertFalse(answer["is_correct"])
+        self.assertEqual(response.data["student_username"], "student")
+
+    def test_the_student_never_sees_the_snapshots(self):
+        self.submit()
+        self.client.force_authenticate(self.student)
+        response = self.client.get(f"/api/attempts/{self.attempt.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        answer = response.data["answers"][0]
+        for field in ("question_text", "choice_text", "choice_feedback_text"):
+            self.assertNotIn(field, answer)
+
+    def test_correctness_is_still_withheld_from_the_student_mid_attempt(self):
+        self.client.force_authenticate(self.student)
+        response = self.client.get(f"/api/attempts/{self.attempt.id}/")
+        self.assertIsNone(response.data["answers"][0]["is_correct"])
+
+    def test_another_teacher_cannot_read_the_attempt(self):
+        intruder = User.objects.create_user(
+            username="intruder", password="pw", role=User.Role.TEACHER
+        )
+        self.client.force_authenticate(intruder)
+        self.assertEqual(self.client.get(f"/api/attempts/{self.attempt.id}/").status_code, 404)
+
+    def test_the_snapshot_survives_the_choice_being_edited(self):
+        """Answers are historical records; editing a question must not rewrite one."""
+        self.submit()
+        self.wrong.text = "Rewritten"
+        self.wrong.feedback_text = "Different explanation."
+        self.wrong.save()
+
+        self.client.force_authenticate(self.teacher)
+        answer = self.client.get(f"/api/attempts/{self.attempt.id}/").data["answers"][0]
+        self.assertEqual(answer["choice_text"], "Wrong")
+        self.assertEqual(answer["choice_feedback_text"], "Because no.")

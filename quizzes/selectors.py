@@ -85,3 +85,94 @@ def assignment_audience(quiz):
         ((students[pk], routes) for pk, routes in reached.items()),
         key=lambda row: (row[0].last_name, row[0].first_name, row[0].username),
     )
+
+
+def question_accuracy(quiz):
+    """Per-question performance on one quiz — FRONTEND_PLAN §5.11.
+
+    The genuinely useful teacher insight on the results screen: a question
+    everyone fails is usually a badly written question, and that is invisible in
+    a column of per-student scores.
+
+    ⚠️ The response filter is scoped to attempts **on this quiz**. Questions are
+    shared by reference, so the same question can live in several quizzes at
+    once; counting its answers unscoped would pool every quiz's results into
+    each one's stats. `quizzes/tests.py` asserts this.
+
+    Only **submitted** attempts count. An in-progress answer can still change,
+    so folding it in would make the number move under the teacher.
+
+    Returns `[(quiz_question, answered_count, correct_count), ...]` in quiz order.
+    Accuracy is deliberately left to the caller: it is `correct_count` over the
+    number of submitted attempts, **not** over `answered_count`, because an
+    unanswered question is scored as incorrect (see `generate_feedback`) and the
+    two must agree.
+    """
+    from django.db.models import Count, Q
+
+    from .models import QuizQuestion
+
+    answered_here = Q(
+        question__responses__attempt__quiz=quiz,
+        question__responses__attempt__submitted_at__isnull=False,
+    )
+
+    rows = (
+        QuizQuestion.objects.filter(quiz=quiz)
+        .select_related("question")
+        .annotate(
+            answered_count=Count("question__responses", filter=answered_here, distinct=True),
+            correct_count=Count(
+                "question__responses",
+                filter=answered_here & Q(question__responses__is_correct=True),
+                distinct=True,
+            ),
+        )
+        .order_by("order")
+    )
+    return [(row, row.answered_count, row.correct_count) for row in rows]
+
+
+def quiz_result_rows(quiz):
+    """One row per student who should have taken this quiz, with their attempt.
+
+    The results table is a roster, not an attempt log: FRONTEND_PLAN §5.11 says
+    "Not started" rows matter as much as submitted ones, because chasing the
+    people who haven't started is most of what the screen is for. So the rows
+    come from `assignment_audience` — who the quiz reaches — and attempts are
+    joined onto them, rather than the other way round.
+
+    A student with an attempt who is **no longer** in the audience still gets a
+    row, with an empty `via`. Unassigning a class after someone submitted must
+    not delete their result from the screen.
+
+    Returns `[(user, via_labels, attempt_or_None), ...]`, students without an
+    attempt last within the name ordering they already have.
+    """
+    from attempts.models import QuizAttempt
+
+    attempts = (
+        QuizAttempt.objects.filter(quiz=quiz)
+        .select_related("student", "feedback")
+        .order_by("-started_at")
+    )
+
+    # An open attempt beats a finished one — the same precedence the student's
+    # own home screen uses, so both screens describe the same state.
+    latest: dict[int, QuizAttempt] = {}
+    for attempt in attempts:
+        current = latest.get(attempt.student_id)
+        if current is None or (current.submitted_at is not None and attempt.submitted_at is None):
+            latest[attempt.student_id] = attempt
+
+    rows = []
+    seen: set[int] = set()
+    for student, via in assignment_audience(quiz):
+        seen.add(student.pk)
+        rows.append((student, via, latest.get(student.pk)))
+
+    for student_id, attempt in latest.items():
+        if student_id not in seen:
+            rows.append((attempt.student, [], attempt))
+
+    return rows

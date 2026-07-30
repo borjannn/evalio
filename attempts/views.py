@@ -13,7 +13,12 @@ from quizzes.permissions import IsStudent
 from quizzes.selectors import student_can_attempt
 
 from .models import AnswerResponse, QuizAttempt
-from .serializers import AnswerSubmitSerializer, QuizAttemptListSerializer, QuizAttemptSerializer
+from .serializers import (
+    AnswerSubmitSerializer,
+    QuizAttemptListSerializer,
+    QuizAttemptSerializer,
+    QuizAttemptTeacherSerializer,
+)
 
 
 class StartAttemptView(APIView):
@@ -119,18 +124,31 @@ class AttemptListView(generics.ListAPIView):
 class AttemptDetailView(generics.RetrieveAPIView):
     """GET /api/attempts/<pk>/ — the student who owns it, or the quiz's teacher.
 
-    Used to resume an in-progress attempt. Safe because `AnswerResponseSerializer`
-    withholds `is_correct` until `submitted_at` is set, and never exposes the
-    snapshotted explanation.
+    Two shapes, switched by role, the same teacher/student split the rest of the
+    app uses:
+
+    - **Student** — `QuizAttemptSerializer`. Used to resume an in-progress
+      attempt. Safe because `AnswerResponseSerializer` withholds `is_correct`
+      until `submitted_at` is set and never exposes the snapshotted explanation.
+    - **Teacher** — `QuizAttemptTeacherSerializer`, which does expose the
+      snapshots, for the §5.12 attempt review. Reachable only for attempts on a
+      quiz they created; the queryset below is what enforces that.
+
+    The switch is on `is_teacher`, so a student can never select the teacher
+    shape for their own attempt.
     """
 
     permission_classes = [IsAuthenticated]
-    serializer_class = QuizAttemptSerializer
+
+    def get_serializer_class(self):
+        if self.request.user.is_teacher:
+            return QuizAttemptTeacherSerializer
+        return QuizAttemptSerializer
 
     def get_queryset(self):
         user = self.request.user
         return (
             QuizAttempt.objects.filter(Q(student=user) | Q(quiz__created_by=user))
-            .select_related("quiz")
+            .select_related("quiz", "student")
             .prefetch_related("answers")
         )

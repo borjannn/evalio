@@ -355,6 +355,74 @@ class QuizViewSet(viewsets.ModelViewSet):
         return Response(TeacherAttemptListSerializer(queryset, many=True).data)
 
     @action(detail=True, methods=["get"], permission_classes=[IsTeacher, IsOwner])
+    def results(self, request, pk=None):
+        """GET /api/quizzes/{id}/results/ — everything the §5.11 screen shows.
+
+        One endpoint for one screen: a roster row per student the quiz reaches,
+        the header summary, and per-question accuracy. They are three shapes but
+        one question — "how did this quiz go" — and splitting them would make the
+        screen fetch three times to draw one table with one header.
+
+        **Unpaginated**, for the same reason `audience/` is: the rows *are* the
+        audience, the screen filters and totals across all of them, and a mean
+        score computed over page 1 would be a lie. One teacher's audience is a
+        few classes' worth of students. See Known gaps for the cohort size where
+        that stops being true.
+
+        ⚠️ Teacher-only, and it carries `is_correct` per question. `IsOwner` plus
+        the `get_queryset()` ownership filter is what keeps it that way.
+        """
+        from attempts.serializers import TeacherAttemptListSerializer
+        from classes.serializers import StudentSummarySerializer
+
+        from .selectors import question_accuracy, quiz_result_rows
+
+        quiz = self.get_object()
+        rows = quiz_result_rows(quiz)
+
+        submitted = [attempt for _, _, attempt in rows if attempt and attempt.submitted_at]
+        in_progress = [
+            attempt for _, _, attempt in rows if attempt and attempt.submitted_at is None
+        ]
+        # Over submitted attempts only, and None rather than 0 when there are
+        # none — "no one has finished yet" and "everyone scored zero" are very
+        # different facts and the screen must not conflate them.
+        scores = [a.feedback.score_percent for a in submitted if hasattr(a, "feedback")]
+        mean_score = round(sum(scores) / len(scores), 1) if scores else None
+
+        return Response(
+            {
+                "summary": {
+                    "assigned_count": len([row for row in rows if row[1]]),
+                    "submitted_count": len(submitted),
+                    "in_progress_count": len(in_progress),
+                    "not_started_count": len([r for r in rows if r[2] is None]),
+                    "mean_score_percent": mean_score,
+                },
+                "questions": [
+                    {
+                        "id": quiz_question.question_id,
+                        "text": quiz_question.question.text,
+                        "order": quiz_question.order,
+                        "answered_count": answered,
+                        "correct_count": correct,
+                    }
+                    for quiz_question, answered, correct in question_accuracy(quiz)
+                ],
+                "rows": [
+                    {
+                        **StudentSummarySerializer(student).data,
+                        "via": via,
+                        "attempt": (
+                            TeacherAttemptListSerializer(attempt).data if attempt else None
+                        ),
+                    }
+                    for student, via, attempt in rows
+                ],
+            }
+        )
+
+    @action(detail=True, methods=["get"], permission_classes=[IsTeacher, IsOwner])
     def audience(self, request, pk=None):
         """GET /api/quizzes/{id}/audience/ — who this quiz's assignments reach.
 

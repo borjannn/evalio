@@ -416,6 +416,79 @@ export type TeacherAttemptListItem = QuizAttemptListItem & {
   student_last_name: string;
 };
 
+/**
+ * `AnswerResponseTeacherSerializer` — the teacher half of the pair, and the only
+ * shape that carries `AnswerResponse`'s snapshot fields.
+ *
+ * ⚠️ `choice_feedback_text` must never reach a student. It is the explanation of
+ * why a choice is wrong, so in practice only wrong choices have one, and it
+ * identifies the correct answer by elimination. There is no student serializer
+ * that returns it; keep it that way.
+ *
+ * The snapshots are what the student actually saw. Both FKs are `SET_NULL`, so
+ * `question` and `selected_choice` are null once the underlying row is deleted —
+ * which is exactly when the text matters most.
+ */
+export type TeacherAnswer = {
+  id: number;
+  question: number | null;
+  selected_choice: number | null;
+  is_correct: boolean;
+  question_text: string;
+  choice_text: string;
+  choice_feedback_text: string;
+  answered_at: string;
+};
+
+/** `QuizAttemptTeacherSerializer` — GET /api/attempts/{id}/ as the quiz's author. */
+export type TeacherAttemptDetail = {
+  id: number;
+  student: number;
+  quiz: number;
+  quiz_title: string;
+  student_username: string;
+  student_first_name: string;
+  student_last_name: string;
+  started_at: string;
+  submitted_at: string | null;
+  answers: TeacherAnswer[];
+};
+
+/**
+ * `GET /api/quizzes/{id}/results/` — the whole §5.11 screen in one response.
+ *
+ * **Unpaginated**, like `audience/`: the rows *are* the audience, and a mean
+ * score computed over page 1 would be a lie. See Known gaps for the cohort size
+ * where that stops being reasonable.
+ *
+ * `mean_score_percent` is null rather than 0 when nobody has submitted — "no one
+ * has finished" and "everyone scored zero" are very different facts.
+ *
+ * A row with an empty `via` is someone who has an attempt but is no longer
+ * assigned; withdrawing an assignment must not erase a result the teacher needs.
+ */
+export type QuizResults = {
+  summary: {
+    assigned_count: number;
+    submitted_count: number;
+    in_progress_count: number;
+    not_started_count: number;
+    mean_score_percent: number | null;
+  };
+  /** In quiz order. `answered_count` counts submitted attempts only. */
+  questions: {
+    id: number;
+    text: string;
+    order: number;
+    answered_count: number;
+    correct_count: number;
+  }[];
+  rows: (StudentSummary & {
+    via: string[];
+    attempt: TeacherAttemptListItem | null;
+  })[];
+};
+
 /** Response of POST /api/attempts/{id}/answer/ — deliberately reports no correctness. */
 export type AnswerSaved = {
   question_id: number;

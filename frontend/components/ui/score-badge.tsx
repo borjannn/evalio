@@ -12,13 +12,23 @@ import { cn } from "@/lib/cn";
  * (FRONTEND_PLAN §1, Guidelines §6.1).
  */
 const bands = [
-  { min: 80, className: "bg-green-50 text-green-700" },
-  { min: 50, className: "bg-amber-50 text-amber-700" },
-  { min: 0, className: "bg-red-50 text-red-600" },
+  { min: 80, className: "bg-green-50 text-green-700", fill: "bg-green-500" },
+  { min: 50, className: "bg-amber-50 text-amber-700", fill: "bg-amber-500" },
+  { min: 0, className: "bg-red-50 text-red-600", fill: "bg-red-500" },
 ] as const;
 
-function bandFor(percent: number): string {
-  return bands.find((band) => percent >= band.min)!.className;
+function bandFor(percent: number) {
+  return bands.find((band) => percent >= band.min)!;
+}
+
+/**
+ * The same thresholds as a solid fill, for the per-question accuracy bars on the
+ * teacher's results screen (§5.11). Exported from here rather than redefined
+ * there so the two cannot drift — a question at 79% and a student at 79% have to
+ * read as the same kind of bad.
+ */
+export function scoreFill(percent: number): string {
+  return bandFor(percent).fill;
 }
 
 export function ScoreBadge({
@@ -36,7 +46,7 @@ export function ScoreBadge({
       className={cn(
         "inline-flex items-center rounded-md font-mono tabular-nums",
         size === "lg" ? "px-4 py-2 text-3xl font-bold" : "px-2 py-1 text-xs",
-        bandFor(percent),
+        bandFor(percent).className,
         className,
       )}
     >

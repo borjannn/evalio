@@ -642,3 +642,155 @@ class QuizBuilderPayloadTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.storage.refresh_from_db()
         self.assertEqual(self.storage.name, "Storage")
+
+
+class QuizResultsTests(APITestCase):
+    """`GET /api/quizzes/{id}/results/` — the §5.11 screen's whole payload.
+
+    Three things here are easy to get quietly wrong, and all three are the kind
+    of wrong a teacher would act on: pooling a shared question's answers across
+    quizzes, dropping students who never started, and dropping a submitted
+    attempt when its assignment is withdrawn.
+    """
+
+    def setUp(self):
+        from attempts.models import AnswerResponse, QuizAttempt
+        from classes.models import Class, Enrollment, QuizAssignment
+        from feedback.services import generate_feedback
+
+        self.teacher = make_teacher()
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Bank")
+
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", created_by=self.teacher, is_published=True
+        )
+        self.question = Question.objects.create(
+            question_bank=self.bank, text="What?", created_by=self.teacher
+        )
+        self.right = Choice.objects.create(
+            question=self.question, text="Right", is_correct=True
+        )
+        self.wrong = Choice.objects.create(
+            question=self.question, text="Wrong", is_correct=False, feedback_text="No."
+        )
+        QuizQuestion = self.quiz.quizquestion_set.model
+        QuizQuestion.objects.create(quiz=self.quiz, question=self.question, order=0)
+
+        self.school_class = Class.objects.create(
+            name="5A", school_year="2025/2026", created_by=self.teacher
+        )
+        QuizAssignment.objects.create(
+            quiz=self.quiz, school_class=self.school_class, assigned_by=self.teacher
+        )
+
+        # Three students in the class: one submits correctly, one never starts,
+        # one is still in progress.
+        self.finisher = make_student("finisher")
+        self.absentee = make_student("absentee")
+        self.midway = make_student("midway")
+        for student in (self.finisher, self.absentee, self.midway):
+            Enrollment.objects.create(student=student, school_class=self.school_class)
+
+        done = QuizAttempt.objects.create(student=self.finisher, quiz=self.quiz)
+        AnswerResponse.objects.create(
+            attempt=done, question=self.question, selected_choice=self.right
+        )
+        from django.utils import timezone
+
+        done.submitted_at = timezone.now()
+        done.save()
+        generate_feedback(done)
+
+        QuizAttempt.objects.create(student=self.midway, quiz=self.quiz)
+
+        self.client.force_authenticate(self.teacher)
+
+    def results(self):
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/results/")
+        self.assertEqual(response.status_code, 200)
+        return response.data
+
+    def test_students_who_never_started_still_get_a_row(self):
+        data = self.results()
+        by_username = {row["username"]: row for row in data["rows"]}
+
+        self.assertIn("absentee", by_username)
+        self.assertIsNone(by_username["absentee"]["attempt"])
+        self.assertEqual(by_username["absentee"]["via"], ["5A"])
+
+        self.assertEqual(data["summary"]["assigned_count"], 3)
+        self.assertEqual(data["summary"]["submitted_count"], 1)
+        self.assertEqual(data["summary"]["in_progress_count"], 1)
+        self.assertEqual(data["summary"]["not_started_count"], 1)
+        self.assertEqual(data["summary"]["mean_score_percent"], 100.0)
+
+    def test_a_submitted_attempt_survives_its_assignment_being_withdrawn(self):
+        from classes.models import QuizAssignment
+
+        QuizAssignment.objects.filter(quiz=self.quiz).delete()
+
+        data = self.results()
+        by_username = {row["username"]: row for row in data["rows"]}
+
+        # Nobody is assigned any more, but the finished attempt is still a result
+        # the teacher needs to see — with an empty `via` to say why it is there.
+        self.assertEqual(data["summary"]["assigned_count"], 0)
+        self.assertIn("finisher", by_username)
+        self.assertEqual(by_username["finisher"]["via"], [])
+        self.assertIsNotNone(by_username["finisher"]["attempt"])
+
+    def test_mean_is_null_rather_than_zero_when_nobody_has_finished(self):
+        from attempts.models import QuizAttempt
+
+        QuizAttempt.objects.filter(submitted_at__isnull=False).delete()
+        self.assertIsNone(self.results()["summary"]["mean_score_percent"])
+
+    def test_question_accuracy_does_not_pool_across_quizzes_sharing_a_question(self):
+        """The trap: questions are shared by reference, attempts are not."""
+        from django.utils import timezone
+
+        from attempts.models import AnswerResponse, QuizAttempt
+
+        other_quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 2", created_by=self.teacher, is_published=True
+        )
+        QuizQuestion = other_quiz.quizquestion_set.model
+        QuizQuestion.objects.create(quiz=other_quiz, question=self.question, order=0)
+
+        # Two wrong answers to the same question, but on the *other* quiz.
+        for name in ("elsewhere1", "elsewhere2"):
+            attempt = QuizAttempt.objects.create(student=make_student(name), quiz=other_quiz)
+            AnswerResponse.objects.create(
+                attempt=attempt, question=self.question, selected_choice=self.wrong
+            )
+            attempt.submitted_at = timezone.now()
+            attempt.save()
+
+        stats = self.results()["questions"]
+        self.assertEqual(len(stats), 1)
+        # 1 and 1 — this quiz's single submitted attempt. Not 3 and 1.
+        self.assertEqual(stats[0]["answered_count"], 1)
+        self.assertEqual(stats[0]["correct_count"], 1)
+
+    def test_in_progress_answers_are_not_counted(self):
+        from attempts.models import AnswerResponse, QuizAttempt
+
+        open_attempt = QuizAttempt.objects.get(student=self.midway)
+        AnswerResponse.objects.create(
+            attempt=open_attempt, question=self.question, selected_choice=self.wrong
+        )
+
+        stats = self.results()["questions"]
+        self.assertEqual(stats[0]["answered_count"], 1)
+
+    def test_another_teachers_quiz_is_a_404(self):
+        intruder = make_teacher("intruder")
+        self.client.force_authenticate(intruder)
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/results/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_student_cannot_read_results(self):
+        self.client.force_authenticate(self.finisher)
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/results/")
+        self.assertIn(response.status_code, (403, 404))
