@@ -163,6 +163,13 @@ class QuestionViewSet(viewsets.ModelViewSet):
         if bank_id:
             queryset = queryset.filter(question_bank_id=bank_id)
 
+        # `?topic=` is what the quiz builder's bank picker searches on: a teacher
+        # usually remembers the question, not which bank they filed it in, so the
+        # picker has to search every bank in the topic at once (FRONTEND_PLAN §5.5).
+        topic_id = self.request.query_params.get("topic")
+        if topic_id:
+            queryset = queryset.filter(question_bank__topic_id=topic_id)
+
         if self.action == "list":
             # `.annotate()` adds a GROUP BY, which makes `QuerySet.ordered` False
             # even with Meta.ordering — and an unordered queryset paginates

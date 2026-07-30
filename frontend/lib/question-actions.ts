@@ -7,6 +7,17 @@ import { requireTeacher } from "@/lib/auth";
 import type { QuestionBank, QuestionType, TeacherQuestion } from "@/lib/types";
 
 /**
+ * Question create/edit, shared by the bank contents screen (§5.7) and the quiz
+ * builder's "Write a question" path (§5.3). Lives in `lib/` rather than beside
+ * either route because both import it — a Server Function is just a module
+ * export.
+ *
+ * Like every `"use server"` module, these are public HTTP endpoints. Being
+ * reachable only from a page you consider protected proves nothing about who
+ * called them, so each re-checks the role.
+ */
+
+/**
  * The payload is a typed object rather than `FormData`.
  *
  * The question form is inherently JavaScript-driven — rows are added and removed,
@@ -26,6 +37,16 @@ export type QuestionPayload = {
   questionType: QuestionType;
   choices: { id?: number; text: string; feedbackText: string }[];
   correctIndex: number;
+  /**
+   * Set when the form was opened from the quiz builder: the new question is
+   * appended to that quiz in the same action.
+   *
+   * §5.3 wants writing a question and adding it to be one gesture, and doing the
+   * add here rather than as a second client call means a teacher can't end up
+   * with a question that was created but never reached the quiz. Ignored when
+   * editing — the question is already wherever it belongs.
+   */
+  addToQuiz?: { quizId: number; order: number };
 };
 
 export type QuestionFormState = { error: string | null; ok?: boolean };
@@ -90,20 +111,34 @@ export async function saveQuestion(
     })),
   };
 
+  let saved: TeacherQuestion;
   try {
     if (payload.id === undefined) {
-      await apiPost<TeacherQuestion>("/questions/", body);
+      saved = await apiPost<TeacherQuestion>("/questions/", body);
     } else {
       // PATCH, and the serializer diffs choices by id rather than recreating
       // them — recreating would orphan every submitted AnswerResponse pointing
       // at a choice.
-      await apiPatch<TeacherQuestion>(`/questions/${payload.id}/`, body);
+      saved = await apiPatch<TeacherQuestion>(`/questions/${payload.id}/`, body);
     }
   } catch (error) {
     if (error instanceof ApiError && error.status === 400) {
       return { error: error.formMessage };
     }
     throw error;
+  }
+
+  if (payload.addToQuiz) {
+    // Membership is only established on create — editing a question the quiz
+    // already holds must not add it a second time (the API would 400 anyway).
+    if (payload.id === undefined) {
+      await apiPost(`/quizzes/${payload.addToQuiz.quizId}/add_question/`, {
+        question_id: saved.id,
+        order: payload.addToQuiz.order,
+      });
+    }
+    // Both paths change what the builder shows: a new row, or new wording.
+    revalidatePath(`/teacher/quizzes/${payload.addToQuiz.quizId}`);
   }
 
   revalidatePath(`/teacher/topics/${payload.topic}/banks/${bankId}`);

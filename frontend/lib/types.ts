@@ -104,10 +104,18 @@ export type StudentQuestion = {
   choices: StudentChoice[];
 };
 
-/** `QuestionTeacherSerializer`. */
+/**
+ * `QuestionTeacherSerializer`.
+ *
+ * `question_bank_name` is read-only (`source="question_bank.name"`). The quiz
+ * builder renders questions flat in quiz order, so which bank one came from is
+ * only visible as a badge, and a cross-bank search needs the name to label its
+ * results — neither can do anything with the id.
+ */
 export type TeacherQuestion = {
   id: number;
   question_bank: number;
+  question_bank_name: string;
   text: string;
   question_type: QuestionType;
   choices: TeacherChoice[];
@@ -202,9 +210,19 @@ export type TeacherQuizListItem = Quiz & {
   assignment_count: number;
 };
 
-/** `QuizDetailTeacherSerializer`. Questions are flattened with their ordering. */
+/**
+ * `QuizDetailTeacherSerializer`. Questions are flattened with their ordering —
+ * the builder renders them as one flat sequence, which is what a student will
+ * experience, rather than grouped by bank.
+ */
 export type QuizDetailTeacher = Quiz & {
-  questions: (TeacherQuestion & { order: number; quiz_question_id: number })[];
+  questions: QuizBuilderQuestion[];
+};
+
+/** One row in the builder: the question, plus where it sits in this quiz. */
+export type QuizBuilderQuestion = TeacherQuestion & {
+  order: number;
+  quiz_question_id: number;
 };
 
 /**

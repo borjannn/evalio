@@ -7,9 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Field, Input, Label, Textarea } from "@/components/ui/field";
+import {
+  saveQuestion,
+  type QuestionFormState,
+  type QuestionPayload,
+} from "@/lib/question-actions";
 import type { QuestionBank, QuestionType, TeacherQuestionWithUsage } from "@/lib/types";
-
-import { saveQuestion, type QuestionFormState, type QuestionPayload } from "./actions";
 
 /**
  * The question form — FRONTEND_PLAN §5.4. Same form for creating and editing.
@@ -62,13 +65,20 @@ export function QuestionForm({
   bankId,
   banks,
   question,
+  addToQuiz,
   onDone,
 }: {
   topicId: number;
+  /** Preselected bank. The builder passes the topic's default; a bank screen passes itself. */
   bankId: number;
   banks: QuestionBank[];
   /** Present when editing. */
   question?: TeacherQuestionWithUsage;
+  /**
+   * Set when the form was opened from the quiz builder. A question written here
+   * is added to the quiz by the same action, so the two never come apart.
+   */
+  addToQuiz?: { quizId: number; order: number };
   onDone: () => void;
 }) {
   const editing = question !== undefined;
@@ -150,6 +160,7 @@ export function QuestionForm({
         feedbackText: row.feedbackText,
       })),
       correctIndex,
+      ...(addToQuiz ? { addToQuiz } : {}),
     });
   }
 
@@ -347,16 +358,21 @@ export function QuestionForm({
               {state.error}
             </p>
           )}
-
-          <div className="flex gap-3">
-            <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : editing ? "Save changes" : "Create question"}
-            </Button>
-            <Button variant="secondary" onClick={onDone}>
-              Cancel
-            </Button>
-          </div>
         </fieldset>
+
+        {/* Outside the fieldset on purpose. `disabled` on a fieldset disables
+            every control inside it, so with these in there the shared-question
+            warning made Cancel unreachable — the only way out of an edit you
+            didn't mean to open was to accept the warning first, which is exactly
+            backwards. Only the destructive control needs gating. */}
+        <div className="flex gap-3">
+          <Button onClick={submit} disabled={pending || needsWarning}>
+            {pending ? "Saving…" : editing ? "Save changes" : "Create question"}
+          </Button>
+          <Button variant="secondary" onClick={onDone}>
+            Cancel
+          </Button>
+        </div>
       </CardBody>
     </Card>
   );

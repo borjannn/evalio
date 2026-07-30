@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Label, selectOnMount } from "@/components/ui/field";
+import { QuestionForm } from "@/components/question-form";
 import { cn } from "@/lib/cn";
+import { deleteQuestion } from "@/lib/question-actions";
 import type {
   QuestionBank,
   QuestionBankDetail,
@@ -17,8 +19,6 @@ import type {
 } from "@/lib/types";
 
 import { renameBank, type BankFormState } from "../actions";
-import { deleteQuestion } from "./actions";
-import { QuestionForm } from "./question-form";
 
 /**
  * ⚠️ **Teacher-only screen.** This component receives `is_correct` and

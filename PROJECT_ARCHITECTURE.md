@@ -234,7 +234,9 @@ CRUD on `topics`, `question-banks`, `questions`, `quizzes`, plus:
 
 `topics`, `question-banks` and `questions` are teacher-only. `quizzes` list/retrieve serves both
 roles and switches serializer by role. `?search=` is supported on topics (name, description), banks
-(name) and questions (text); banks accept `?topic=` and questions `?question_bank=`.
+(name) and questions (text); banks accept `?topic=`, and questions accept both `?question_bank=`
+(one bank) and `?topic=` (every bank in the topic — what the quiz builder's cross-bank picker
+searches, since a teacher remembers the question rather than where they filed it).
 
 #### Read-only count fields
 
@@ -251,6 +253,14 @@ raises instead of returning null.
 | `quiz_usage_count` | `QuestionTeacherListSerializer` | questions list/retrieve, bank retrieve | Quizzes referencing the question |
 | `submitted_answer_count` | `QuestionTeacherListSerializer` | questions list/retrieve, bank retrieve | Answers on **submitted** attempts only |
 | `question_count`, `assignment_count` | `QuizTeacherListSerializer` | quizzes list, teacher only | Size and reach of the quiz |
+
+`question_bank_name` on `QuestionTeacherSerializer` is not an annotation but a read-only
+`source="question_bank.name"`. The quiz builder renders questions flat in quiz order, so the bank is
+only visible as a badge, and a cross-bank search needs a label — neither can use the id. It is
+resolved through `select_related`, not per row: `QuizDetailTeacherSerializer.get_questions` joins
+`question__question_bank` and prefetches `question__choices`, so a 20-question quiz costs the same
+number of queries as a 2-question one. `quizzes/tests.py` asserts exactly that rather than an exact
+count, which would break on any unrelated change.
 
 Two consequences worth knowing:
 
@@ -368,6 +378,10 @@ Not yet implemented. Listed so this document doesn't drift into describing inten
 - **Question ordering within a quiz is client-driven.** `reorder` sets positions atomically but
   nothing prevents two teachers racing on the same quiz.
 - **No `Choice` ordering.** Choices render in insertion order; there is no `order` field.
+- **Drag-to-reorder in the quiz builder is untested by automation.** The keyboard path (focus the
+  grip, arrow keys) is verified end to end and shares all the reorder logic, but synthetic mouse
+  events don't fire native HTML5 drag events, so the `dragstart`/`dragover`/`drop` wiring has only
+  been read, not exercised.
 - **`SECRET_KEY` falls back to a hardcoded value** when `DJANGO_SECRET_KEY` is unset. Fine for local
   development, must be set in any deployment.
 - **CORS is still configured** for `http://localhost:3000`. Under the planned BFF the browser talks

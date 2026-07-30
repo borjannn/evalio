@@ -473,3 +473,109 @@ class BankListAnnotationTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertIn("id", response.data)
         self.assertNotIn("questions_in_use_count", response.data)
+
+
+class QuizBuilderPayloadTests(APITestCase):
+    """What the quiz builder reads: FRONTEND_PLAN §5.3 and the §5.5 bank picker."""
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        self.storage = QuestionBank.objects.create(topic=self.topic, name="Storage")
+        self.devices = QuestionBank.objects.create(topic=self.topic, name="Devices")
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", created_by=self.teacher
+        )
+
+    def _question(self, bank, text):
+        question = Question.objects.create(
+            question_bank=bank, text=text, created_by=self.teacher
+        )
+        Choice.objects.create(question=question, text="Yes", is_correct=True)
+        Choice.objects.create(question=question, text="No", feedback_text="No is wrong.")
+        return question
+
+    def test_quiz_detail_labels_each_question_with_its_bank(self):
+        # The builder renders the quiz flat, in order, so bank membership is only
+        # visible as a badge — it needs the name, not the id.
+        self.quiz.quizquestion_set.create(question=self._question(self.storage, "A"), order=0)
+        self.quiz.quizquestion_set.create(question=self._question(self.devices, "B"), order=1)
+
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/")
+        self.assertEqual(response.status_code, 200)
+        names = [q["question_bank_name"] for q in response.data["questions"]]
+        self.assertEqual(names, ["Storage", "Devices"])
+
+    def test_quiz_detail_query_count_does_not_grow_with_the_quiz(self):
+        """The real N+1 guard: a longer quiz must not cost more queries.
+
+        Asserting an exact number would break on any unrelated middleware change.
+        Asserting that two sizes cost the same is what actually matters.
+        """
+        for index in range(2):
+            self.quiz.quizquestion_set.create(
+                question=self._question(self.storage, f"Q{index}"), order=index
+            )
+        small = self._detail_queries()
+
+        big_quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 2", created_by=self.teacher
+        )
+        for index in range(8):
+            big_quiz.quizquestion_set.create(
+                question=self._question(self.devices, f"B{index}"), order=index
+            )
+        big = self._detail_queries(big_quiz)
+
+        self.assertEqual(small, big)
+
+    def _detail_queries(self, quiz=None):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(f"/api/quizzes/{(quiz or self.quiz).id}/")
+            self.assertEqual(response.status_code, 200)
+        # `captured` reads `connection.queries` lazily through the indices it
+        # recorded, so calling `reset_queries()` before this line would empty the
+        # log and report zero — which is exactly how this helper silently passed
+        # against an unfixed N+1 the first time.
+        return len(captured)
+
+    def test_questions_can_be_searched_across_every_bank_in_a_topic(self):
+        # §5.5: a teacher remembers the question, not which bank it is in.
+        self._question(self.storage, "Which unit is the largest?")
+        self._question(self.devices, "Which device is largest?")
+        self._question(self.storage, "Unrelated")
+
+        response = self.client.get(f"/api/questions/?topic={self.topic.id}&search=largest")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(
+            {row["question_bank_name"] for row in response.data["results"]},
+            {"Storage", "Devices"},
+        )
+
+    def test_the_topic_filter_cannot_reach_another_teachers_questions(self):
+        other = make_teacher("other")
+        other_topic = Topic.objects.create(name="Theirs", created_by=other)
+        other_bank = QuestionBank.objects.create(topic=other_topic, name="Theirs")
+        Question.objects.create(
+            question_bank=other_bank, text="Secret", created_by=other
+        )
+
+        response = self.client.get(f"/api/questions/?topic={other_topic.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+
+    def test_question_bank_name_is_read_only(self):
+        question = self._question(self.storage, "A")
+        response = self.client.patch(
+            f"/api/questions/{question.id}/",
+            {"question_bank_name": "Renamed by the client"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.storage.refresh_from_db()
+        self.assertEqual(self.storage.name, "Storage")

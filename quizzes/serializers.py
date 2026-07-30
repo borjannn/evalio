@@ -35,10 +35,18 @@ class ChoiceReadSerializer(serializers.ModelSerializer):
 
 class QuestionTeacherSerializer(serializers.ModelSerializer):
     choices = ChoiceWriteSerializer(many=True)
+    # Which bank a question came from is contextual metadata in the quiz builder
+    # and the deciding label in a cross-bank search, so both screens need the name
+    # rather than the id. Read-only, so it is ignored on write — `question_bank`
+    # stays the writable field.
+    question_bank_name = serializers.CharField(source="question_bank.name", read_only=True)
 
     class Meta:
         model = Question
-        fields = ("id", "question_bank", "text", "question_type", "choices", "created_by", "created_at")
+        fields = (
+            "id", "question_bank", "question_bank_name", "text", "question_type",
+            "choices", "created_by", "created_at",
+        )
         read_only_fields = ("created_by", "created_at")
 
     def create(self, validated_data):
@@ -141,11 +149,22 @@ class QuizTeacherListSerializer(QuizSerializer):
 
 
 class QuizDetailTeacherSerializer(serializers.ModelSerializer):
-    """Full quiz details for teachers with all questions and choices."""
+    """Full quiz details for teachers with all questions and choices.
+
+    This is what the quiz builder renders, so it is the one place a whole quiz is
+    serialized at once — and the one most exposed to N+1. The joins below are
+    load-bearing rather than tidying: without them a 20-question quiz costs 40
+    extra queries to draw one screen.
+    """
+
     questions = serializers.SerializerMethodField()
 
     def get_questions(self, obj):
-        quiz_questions = obj.quizquestion_set.all().order_by("order")
+        quiz_questions = (
+            obj.quizquestion_set.select_related("question__question_bank")
+            .prefetch_related("question__choices")
+            .order_by("order")
+        )
         return [
             {
                 **QuestionTeacherSerializer(qq.question).data,

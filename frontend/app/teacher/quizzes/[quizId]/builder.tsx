@@ -1,0 +1,409 @@
+"use client";
+
+import { FileQuestion, Library, Pencil, PenLine, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { useActionState, useState, useTransition } from "react";
+
+import { QuestionForm } from "@/components/question-form";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Field, Input, Textarea } from "@/components/ui/field";
+import { cn } from "@/lib/cn";
+import type {
+  QuestionBank,
+  QuizBuilderQuestion,
+  QuizDetailTeacher,
+  TeacherQuestionWithUsage,
+} from "@/lib/types";
+
+import {
+  deleteQuiz,
+  loadQuestionForEdit,
+  reorderQuestions,
+  setPublished,
+  updateQuizDetails,
+  type QuizEditState,
+} from "./actions";
+import { BankPicker } from "./bank-picker";
+import { QuestionRow } from "./question-row";
+
+/**
+ * ★ The quiz builder — FRONTEND_PLAN §5.3.
+ *
+ * ⚠️ Teacher-only. Receives the answer key on every choice; see the page docblock.
+ *
+ * The screen exists so a teacher can verify the **sequence** a student will
+ * experience, which is why questions render flat in `order` and bank membership
+ * is only a badge.
+ */
+
+/** Which panel the [+] button opened, if any. */
+type AddMode = "write" | "bank" | null;
+
+export function QuizBuilder({
+  quiz,
+  banks,
+  pickable,
+  pickableTotal,
+}: {
+  quiz: QuizDetailTeacher;
+  banks: QuestionBank[];
+  /** The bank picker's unfiltered first page — see the page's docblock. */
+  pickable: TeacherQuestionWithUsage[];
+  pickableTotal: number;
+}) {
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Editing loads the question again to get its reuse counts — the quiz detail
+  // shape has none, and without them §5.4's shared-question warning would either
+  // be silent or invented.
+  const [editing, setEditing] = useState<TeacherQuestionWithUsage | null>(null);
+  const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
+  const [, startEdit] = useTransition();
+
+  function beginEdit(questionId: number) {
+    setAddMode(null);
+    setEditing(null);
+    setLoadingEditId(questionId);
+    startEdit(async () => {
+      const full = await loadQuestionForEdit(questionId);
+      setEditing(full);
+      setLoadingEditId(null);
+    });
+  }
+
+  // The order is held locally so a drag lands immediately rather than after a
+  // round trip, then confirmed against the server.
+  const [order, setOrder] = useState<QuizBuilderQuestion[]>(quiz.questions);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [, startReorder] = useTransition();
+
+  // Re-sync when the route revalidates and hands down a new list. Adjusting state
+  // during render rather than in an effect: the corrected list is on screen in
+  // the same paint, so a stale order never flashes.
+  const [seenQuestions, setSeenQuestions] = useState(quiz.questions);
+  if (quiz.questions !== seenQuestions) {
+    setSeenQuestions(quiz.questions);
+    setOrder(quiz.questions);
+  }
+
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const [detailsState, detailsAction, detailsPending] = useActionState<QuizEditState, FormData>(
+    updateQuizDetails,
+    { error: null },
+  );
+  const [seenDetails, setSeenDetails] = useState(detailsState);
+  if (detailsState !== seenDetails) {
+    setSeenDetails(detailsState);
+    if (detailsState.ok) setEditingDetails(false);
+  }
+
+  /** Move one question and persist the whole sequence in a single atomic call. */
+  function commitOrder(next: QuizBuilderQuestion[]) {
+    setOrder(next);
+    setReorderError(null);
+    startReorder(async () => {
+      const outcome = await reorderQuestions(
+        quiz.id,
+        next.map((question) => question.id),
+      );
+      if (outcome.error) {
+        setReorderError(outcome.error);
+        setOrder(quiz.questions);
+      }
+    });
+  }
+
+  function move(from: number, to: number) {
+    if (to < 0 || to >= order.length || from === to) return;
+    const next = [...order];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    commitOrder(next);
+  }
+
+  // §5.4 wants a bank preselected so the field is never empty. Every topic starts
+  // with "Uncategorised"; fall back to the first bank if it was deleted.
+  const defaultBank =
+    banks.find((bank) => bank.name === "Uncategorised") ?? banks[0];
+
+  return (
+    <div className="space-y-8">
+      {editingDetails ? (
+        <Card className="w-full max-w-2xl">
+          <CardBody className="space-y-4 p-6">
+            <form action={detailsAction} className="space-y-4">
+              <input type="hidden" name="id" value={quiz.id} />
+              <Field htmlFor="quiz-title" label="Title">
+                <Input
+                  id="quiz-title"
+                  name="title"
+                  defaultValue={quiz.title}
+                  autoFocus
+                  required
+                />
+              </Field>
+              <Field
+                htmlFor="quiz-description"
+                label="Description"
+                hint="Optional. Students see this before they start."
+              >
+                <Textarea
+                  id="quiz-description"
+                  name="description"
+                  defaultValue={quiz.description}
+                  rows={3}
+                />
+              </Field>
+              {detailsState.error && (
+                <p role="alert" aria-live="polite" className="text-sm text-red-600">
+                  {detailsState.error}
+                </p>
+              )}
+              <div className="flex gap-3">
+                <Button type="submit" disabled={detailsPending}>
+                  {detailsPending ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="secondary" onClick={() => setEditingDetails(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 space-y-2">
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-semibold tracking-tight">{quiz.title}</h1>
+                {/* Draft vs Published is the highest-consequence fact on this
+                    screen: an unpublished quiz is invisible to students even when
+                    assigned. */}
+                <Badge tone={quiz.is_published ? "success" : "neutral"}>
+                  {quiz.is_published ? "Published" : "Draft"}
+                </Badge>
+                <button
+                  type="button"
+                  onClick={() => setEditingDetails(true)}
+                  aria-label="Edit title and description"
+                  className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <Pencil size={16} />
+                </button>
+              </div>
+              {quiz.description && (
+                <p className="max-w-2xl text-muted-foreground">{quiz.description}</p>
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-3">
+              <Link
+                href={`/teacher/quizzes/${quiz.id}/results`}
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                Results
+              </Link>
+              <Link
+                href={`/teacher/quizzes/${quiz.id}/assign`}
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                Assign
+              </Link>
+              {/* Publishing is a soft flag — a published quiz stays editable and
+                  un-publishing keeps existing attempts — so it needs no confirm. */}
+              <form action={setPublished}>
+                <input type="hidden" name="id" value={quiz.id} />
+                <input type="hidden" name="published" value={String(!quiz.is_published)} />
+                <Button type="submit" variant={quiz.is_published ? "secondary" : "primary"}>
+                  {quiz.is_published ? "Unpublish" : "Publish"}
+                </Button>
+              </form>
+            </div>
+          </div>
+
+          {confirmingDelete ? (
+            <form action={deleteQuiz} className="flex flex-wrap items-center gap-3">
+              <input type="hidden" name="id" value={quiz.id} />
+              <input type="hidden" name="topic" value={quiz.topic} />
+              <span className="text-sm text-muted-foreground">
+                Delete this quiz? Its questions stay in their banks, but any attempts and
+                results go with it.
+              </span>
+              <Button type="submit" variant="destructive">
+                Delete quiz
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmingDelete(false)}>
+                Cancel
+              </Button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <Trash2 size={14} />
+              Delete quiz
+            </button>
+          )}
+        </div>
+      )}
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Questions{" "}
+            <span className="font-normal text-muted-foreground">({order.length})</span>
+          </h2>
+          {addMode === null && (
+            <Button onClick={() => setAddMode("write")}>
+              <Plus size={16} />
+              Add question
+            </Button>
+          )}
+        </div>
+
+        {reorderError && (
+          <p role="alert" aria-live="polite" className="text-sm text-red-600">
+            {reorderError}
+          </p>
+        )}
+
+        {addMode !== null && defaultBank && (
+          <div className="space-y-4">
+            {/* Two paths, presented as tabs inside one panel rather than as a
+                menu. "Write a question" is the default: a new teacher's banks are
+                empty, so bank-first would be a dead end on day one. */}
+            <div
+              role="tablist"
+              aria-label="How to add a question"
+              className="inline-flex gap-1 rounded-md bg-secondary p-1"
+            >
+              <PathTab
+                active={addMode === "write"}
+                icon={PenLine}
+                onClick={() => setAddMode("write")}
+              >
+                Write a question
+              </PathTab>
+              <PathTab
+                active={addMode === "bank"}
+                icon={Library}
+                onClick={() => setAddMode("bank")}
+              >
+                Add from a bank
+              </PathTab>
+            </div>
+
+            {addMode === "write" ? (
+              <QuestionForm
+                topicId={quiz.topic}
+                bankId={defaultBank.id}
+                banks={banks}
+                addToQuiz={{ quizId: quiz.id, order: order.length }}
+                onDone={() => setAddMode(null)}
+              />
+            ) : (
+              <BankPicker
+                quizId={quiz.id}
+                topicId={quiz.topic}
+                banks={banks}
+                alreadyIn={order.map((question) => question.id)}
+                nextOrder={order.length}
+                initialResults={pickable}
+                initialTotal={pickableTotal}
+                onDone={() => setAddMode(null)}
+              />
+            )}
+          </div>
+        )}
+
+        {order.length === 0 ? (
+          <EmptyState
+            icon={FileQuestion}
+            title="No questions yet"
+            description="Write one, or pull an existing question out of a bank. Students see them in the order you set here."
+            action={<Button onClick={() => setAddMode("write")}>Add the first question</Button>}
+          />
+        ) : (
+          <div className="space-y-3">
+            {order.map((question, index) =>
+              // Editing replaces the row in place, so the sequence stays legible
+              // and the form appears where the teacher was looking. It is the
+              // same §5.4 form, which warns before changing a shared question.
+              editing?.id === question.id ? (
+                <QuestionForm
+                  key={question.id}
+                  topicId={quiz.topic}
+                  bankId={editing.question_bank}
+                  banks={banks}
+                  question={editing}
+                  addToQuiz={{ quizId: quiz.id, order: question.order }}
+                  onDone={() => setEditing(null)}
+                />
+              ) : (
+                <QuestionRow
+                  key={question.id}
+                  quizId={quiz.id}
+                  question={question}
+                  position={index + 1}
+                  total={order.length}
+                  loadingEdit={loadingEditId === question.id}
+                  dragging={dragIndex === index}
+                  dropTarget={overIndex === index && dragIndex !== index}
+                  onEdit={() => beginEdit(question.id)}
+                  onDragStart={() => setDragIndex(index)}
+                  onDragEnter={() => setOverIndex(index)}
+                  onDragEnd={() => {
+                    if (dragIndex !== null && overIndex !== null) move(dragIndex, overIndex);
+                    setDragIndex(null);
+                    setOverIndex(null);
+                  }}
+                  onMove={(delta) => move(index, index + delta)}
+                />
+              ),
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function PathTab({
+  active,
+  icon: Icon,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  icon: typeof PenLine;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        active
+          ? "bg-white text-foreground"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <Icon size={16} />
+      {children}
+    </button>
+  );
+}

@@ -170,6 +170,15 @@ Cookie lifetimes mirror `SIMPLE_JWT` on purpose: the access cookie expires exact
 does, so "refresh cookie present, access cookie absent" is a reliable expiry signal and `proxy.ts`
 refreshes on it without parsing the JWT. Change one side and sessions break.
 
+**Where shared code goes.** A Server Function is just a module export, so anything two routes both
+use moves out of the route folder rather than being duplicated or re-exported: shared `"use server"`
+modules to `lib/` (`lib/question-actions.ts`, `lib/actions.ts`), shared components to `components/`
+(`components/question-form.tsx`). Actions used by one route stay in that route's `actions.ts`.
+
+**`<fieldset disabled>` disables everything inside it, including Cancel.** Gate the destructive
+control, not the whole form — the question form's shared-question warning once made backing out of
+an edit impossible without first accepting the warning.
+
 Lint with `npm run lint` and typecheck with `npm run typecheck` in `frontend/`.
 
 ## Linting
@@ -179,7 +188,7 @@ Frontend: `npm run lint` and `npm run typecheck` from `frontend/`.
 
 ## Testing
 
-63 tests across five apps. Run the suite before finishing any backend change.
+85 tests across five apps. Run the suite before finishing any backend change.
 
 ```
 python manage.py test              # needs the database up, same as any other management command
@@ -190,7 +199,9 @@ python manage.py test attempts     # one app
   fallbacks, idempotent re-submission, and that editing or deleting a choice cannot rewrite or
   destroy a submitted attempt.
 - `quizzes/tests.py` — ownership isolation, many-banks-per-topic, choice diffing on edit, atomic
-  reorder.
+  reorder, and the teacher-only count annotations. The N+1 guard on the quiz detail asserts that a
+  2-question and an 8-question quiz cost the **same** number of queries, not an exact count — an
+  exact number breaks on any unrelated change, and the invariant that matters is "doesn't grow".
 - `classes/tests.py` — the assignment target constraints (including the partial unique indexes),
   assignment resolution through class and group, and scoped student search.
 - `attempts/tests.py` — the full lifecycle: assignment-gated start, resume rather than duplicate,
