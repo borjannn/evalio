@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Section } from "@/components/ui/section";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { ApiError, apiGet } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
@@ -63,11 +64,7 @@ export default async function TopicDetailPage({
 
       {/* Quizzes — the frequent destination, so it comes first and its create
           action is primary. Banks are secondary (§5.2). */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold tracking-tight">Quizzes</h2>
-          <NewQuiz topicId={topic.id} />
-        </div>
+      <Section title="Quizzes" count={quizzes.count} actions={<NewQuiz topicId={topic.id} />}>
 
         {quizzes.results.length === 0 ? (
           <EmptyState
@@ -120,22 +117,24 @@ export default async function TopicDetailPage({
             </TBody>
           </Table>
         )}
-      </section>
+      </Section>
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold tracking-tight">Question banks</h2>
+      <Section
+        title="Question banks"
+        count={banks.count}
+        actions={
           <Link
             href={`/teacher/topics/${topic.id}/banks`}
-            className="text-sm font-medium text-muted-foreground hover:text-foreground hover:underline"
+            className="rounded-md px-2 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary/8 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             Manage banks →
           </Link>
-        </div>
+        }
+      >
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {banks.results.map((bank) => (
-            <Card key={bank.id} className="transition-colors hover:border-ring">
+            <Card key={bank.id} interactive>
               <CardBody className="flex items-center justify-between gap-3">
                 <Link
                   href={`/teacher/topics/${topic.id}/banks/${bank.id}`}
@@ -151,7 +150,7 @@ export default async function TopicDetailPage({
             </Card>
           ))}
         </div>
-      </section>
+      </Section>
     </div>
   );
 }

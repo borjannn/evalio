@@ -6,6 +6,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
 import { ScoreBadge } from "@/components/ui/score-badge";
+import { PageHeader } from "@/components/ui/section";
 import { apiGet } from "@/lib/api";
 import { requireStudent } from "@/lib/auth";
 import type { FeedbackResult, Paginated } from "@/lib/types";
@@ -40,12 +41,10 @@ export default async function StudentHistory({
   return (
     <StudentShell user={user}>
       <div className="space-y-8">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">History</h1>
-          <p className="mt-1 text-muted-foreground">
-            Quizzes you&apos;ve finished. Open one to read its feedback again.
-          </p>
-        </div>
+        <PageHeader
+          title="History"
+          description="Quizzes you've finished. Open one to read its feedback again."
+        />
 
         {results.results.length === 0 ? (
           <EmptyState
@@ -58,12 +57,12 @@ export default async function StudentHistory({
             <ul className="space-y-3">
               {results.results.map((result) => (
                 <li key={result.id}>
-                  <Card>
+                  <Card interactive>
                     {/* The whole row is the link. A score and a date are not
                         things anyone wants to aim at individually. */}
                     <Link
                       href={`/student/attempts/${result.attempt}/result`}
-                      className="block rounded-xl transition-colors hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                      className="block rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
                       <CardBody className="flex flex-wrap items-center justify-between gap-4">
                         <div className="min-w-0">

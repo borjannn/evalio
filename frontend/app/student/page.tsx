@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
+import { PageHeader } from "@/components/ui/section";
 import { apiGet } from "@/lib/api";
 import { requireStudent } from "@/lib/auth";
 import type { Paginated, StudentQuizListItem } from "@/lib/types";
@@ -73,12 +74,10 @@ export default async function StudentQuizzes({
   return (
     <StudentShell user={user}>
       <div className="space-y-8">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Your quizzes</h1>
-          <p className="mt-1 text-muted-foreground">
-            Everything your teachers have assigned to you.
-          </p>
-        </div>
+        <PageHeader
+          title="Your quizzes"
+          description="Everything your teachers have assigned to you."
+        />
 
         {/* Set by `startAttempt` when Django refuses: the quiz was unassigned or
             unpublished between this list rendering and the button being pressed.
@@ -107,7 +106,7 @@ export default async function StudentQuizzes({
                 return (
                   <li key={quiz.id}>
                     <Card>
-                      <CardBody className="flex flex-wrap items-start justify-between gap-4">
+                      <CardBody className="flex flex-wrap items-start justify-between gap-4 p-6">
                         <div className="min-w-0 space-y-2">
                           <h2 className="text-lg font-semibold tracking-tight">
                             {quiz.title}

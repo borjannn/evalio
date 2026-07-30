@@ -14,11 +14,35 @@
   --font-mono: var(--font-space-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 
+  /* Line heights. Tailwind ships 14px/20px, which is tight enough that a
+     two-line card description reads as one block of grey. 14px/21px is the
+     single highest-leverage readability change in this file — it costs nothing
+     and every screen gets it. The reading sizes go looser still. */
+  --text-sm--line-height: 1.5;
+  --text-base--line-height: 1.6;
+
   /* Background & surface */
   --color-background: #ffffff;
   --color-secondary: #f1f5f9;
   --color-secondary-foreground: #0f172a;
   --color-muted: #e2e8f0;
+
+  /* The page ground. Named rather than reached for as `bg-slate-50` in the
+     layout, so the one surface everything else sits on is a token like the
+     rest. Cards are white and lift off it by value. */
+  --color-canvas: #f6f8fb;
+
+  /* Elevation.
+     Guidelines §1 used to say "zero drop-shadows" and mean it — cards separated
+     by a 1px line alone. That reads flat rather than clean once a screen has
+     three levels of nesting, so there is now exactly one card shadow, and it is
+     structural: it is what says "this is a surface above the ground". It is
+     deliberately too faint to read as decoration.
+
+     `--shadow-raised` is for things that genuinely float — nothing uses it for
+     a card that is merely sitting there. */
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.03);
+  --shadow-raised: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 2px 6px -2px rgb(15 23 42 / 0.04);
 
   /* Foreground & typography.
      Slate rather than pure neutral: the greys carry a trace of blue, so the
@@ -57,6 +81,21 @@
 
   body {
     color: var(--color-foreground);
+    /* Slightly tighter letterfit at body sizes. Inter is drawn a touch wide for
+       UI at 14px; -0.006em closes it up without the headline-y feel that
+       `tracking-tight` gives. */
+    letter-spacing: -0.006em;
+  }
+
+  /* Headings carry their own tighter fit, so they don't inherit the body's and
+     compound it. The value matches Tailwind's `tracking-tight` deliberately:
+     ~30 headings across the app still carry that utility, and a base rule with
+     a different value would make two headings side by side sit differently
+     depending on which one someone remembered to add the class to. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.025em;
   }
 }
 

@@ -27,9 +27,9 @@ export default async function TeacherDashboard() {
       {/* NewTopic owns the header row so its button (top-right) and its inline
           form (full width, below) can share one open/closed state. */}
       <NewTopic>
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Topics</h1>
-          <p className="mt-1 text-muted-foreground">
+        <div className="min-w-0 space-y-1.5">
+          <h1 className="text-3xl font-semibold">Topics</h1>
+          <p className="text-muted-foreground">
             Manage your subjects, quizzes, and question banks.
           </p>
         </div>
@@ -47,15 +47,16 @@ export default async function TeacherDashboard() {
             {topics.map((topic) => (
               <Card
                 key={topic.id}
-                className="group flex h-full flex-col transition-colors hover:border-ring"
+                interactive
+                className="group flex h-full flex-col"
               >
-                <CardBody className="flex-1">
+                <CardBody className="flex-1 p-6">
                   <div className="flex items-start justify-between gap-2">
                     <Link
                       href={`/teacher/topics/${topic.id}`}
                       className="min-w-0 flex-1 rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
-                      <h2 className="text-lg font-semibold transition-colors group-hover:text-accent">
+                      <h2 className="text-lg font-semibold transition-colors group-hover:text-primary">
                         {topic.name}
                       </h2>
                     </Link>

@@ -27,7 +27,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
       {/* Translucent + blurred rather than solid: content scrolling under the
           header stays faintly visible, which is what makes a sticky bar read as
           a layer instead of a lid. */}
-      <header className="sticky top-0 z-10 border-b border-border bg-white/80 backdrop-blur-md">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex h-[72px] max-w-6xl items-center justify-between px-4">
           <div className="flex items-center gap-8">
             <Link
@@ -63,7 +63,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
         </div>
       </header>
 
-      <main className="page-enter mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+      <main className="page-enter mx-auto w-full max-w-6xl flex-1 space-y-10 px-4 py-10 md:px-6">
         {children}
       </main>
     </div>

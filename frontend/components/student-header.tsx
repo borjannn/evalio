@@ -24,7 +24,7 @@ export function StudentHeader({ user }: { user: User }) {
     [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
 
   return (
-    <header className="sticky top-0 z-10 border-b border-border bg-white/80 backdrop-blur-md">
+    <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-[72px] max-w-3xl items-center justify-between px-4">
         <div className="flex items-center gap-8">
           <Link
@@ -71,7 +71,7 @@ export function StudentShell({
   return (
     <div className="flex min-h-screen flex-col">
       <StudentHeader user={user} />
-      <main className="page-enter mx-auto w-full max-w-3xl flex-1 px-4 py-8">{children}</main>
+      <main className="page-enter mx-auto w-full max-w-3xl flex-1 px-4 py-10 md:px-6">{children}</main>
     </div>
   );
 }

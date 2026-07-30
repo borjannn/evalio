@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/cn";
 import type {
   QuestionBank,
@@ -254,19 +255,18 @@ export function QuizBuilder({
         </div>
       )}
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Questions{" "}
-            <span className="font-normal text-muted-foreground">({order.length})</span>
-          </h2>
-          {addMode === null && (
+      <Section
+        title="Questions"
+        count={order.length}
+        actions={
+          addMode === null && (
             <Button onClick={() => setAddMode("write")}>
               <Plus size={16} />
               Add question
             </Button>
-          )}
-        </div>
+          )
+        }
+      >
 
         {reorderError && (
           <p role="alert" aria-live="polite" className="text-sm text-red-600">
@@ -360,7 +360,7 @@ export function QuizBuilder({
             }
           />
         )}
-      </section>
+      </Section>
     </div>
   );
 }

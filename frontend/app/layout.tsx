@@ -28,12 +28,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${inter.variable} ${spaceMono.variable}`}>
-      {/* The page ground is slate-50, not --color-background. Cards are white
-          and lift off the ground by value alone, which is what lets the design
-          hold to "zero decorative drop-shadows" (Guidelines §1).
-          Slate rather than neutral so the ground shares the palette's cool cast
-          instead of sitting under it as flat grey. */}
-      <body className="min-h-screen bg-slate-50 font-sans text-foreground antialiased">
+      {/* The page ground is --color-canvas, not --color-background. Cards are
+          white and lift off the ground by value *and* by a hairline shadow.
+          The ground carries the palette's cool cast so the brand blue reads as
+          native to it rather than applied on top. */}
+      <body className="min-h-screen bg-canvas font-sans text-foreground antialiased">
         {children}
       </body>
     </html>

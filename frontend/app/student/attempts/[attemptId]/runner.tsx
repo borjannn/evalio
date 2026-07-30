@@ -100,7 +100,7 @@ export function Runner({
           mid-attempt loses their place, so the only way out is deliberate — and
           it says "Save & exit" because that is literally true, every answer
           having been written as it was made. */}
-      <header className="sticky top-0 z-10 border-b border-border bg-white/80 backdrop-blur-md">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex h-[72px] max-w-2xl items-center justify-between gap-4 px-4">
           <div className="flex min-w-0 items-center gap-4">
             <Brand />

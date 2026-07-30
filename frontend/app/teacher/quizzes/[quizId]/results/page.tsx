@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ScoreBadge, scoreFill } from "@/components/ui/score-badge";
+import { PageHeader, Section } from "@/components/ui/section";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { ApiError, apiGet } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
@@ -62,16 +63,18 @@ export default async function QuizResultsPage({
 
   return (
     <div className="space-y-8">
-      <div className="space-y-4">
-        <Link
-          href={`/teacher/quizzes/${quiz.id}`}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft size={14} />
-          {quiz.title}
-        </Link>
-        <h1 className="text-3xl font-semibold tracking-tight">Results</h1>
-      </div>
+      <PageHeader
+        title="Results"
+        eyebrow={
+          <Link
+            href={`/teacher/quizzes/${quiz.id}`}
+            className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <ArrowLeft size={14} />
+            {quiz.title}
+          </Link>
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Assigned" value={summary.assigned_count} />
@@ -96,13 +99,11 @@ export default async function QuizResultsPage({
 
       <QuestionAccuracy questions={results.questions} submittedCount={summary.submitted_count} />
 
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Students <span className="font-normal text-muted-foreground">({rows.length})</span>
-          </h2>
-
-          {routes.length > 1 && (
+      <Section
+        title="Students"
+        count={rows.length}
+        actions={
+          routes.length > 1 && (
             <div className="flex flex-wrap items-center gap-1">
               <FilterChip
                 href={`/teacher/quizzes/${quiz.id}/results` as Route}
@@ -122,9 +123,9 @@ export default async function QuizResultsPage({
                 </FilterChip>
               ))}
             </div>
-          )}
-        </div>
-
+          )
+        }
+      >
         {results.rows.length === 0 ? (
           <EmptyState
             icon={Users}
@@ -230,7 +231,7 @@ export default async function QuizResultsPage({
             </TBody>
           </Table>
         )}
-      </section>
+      </Section>
     </div>
   );
 }
@@ -247,9 +248,11 @@ function Stat({
   return (
     <Card>
       <CardBody className="p-5">
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          {label}
+        </p>
+        <p className="mt-1.5 text-3xl font-semibold tabular-nums">{value}</p>
+        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardBody>
     </Card>
   );
@@ -274,17 +277,18 @@ function QuestionAccuracy({
   if (questions.length === 0) return null;
 
   return (
-    <section className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight">By question</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+    <Section
+      title="By question"
+      description={
+        <>
           {submittedCount === 0
             ? "Nothing to show until someone submits."
             : `Across ${submittedCount} submitted ${
                 submittedCount === 1 ? "attempt" : "attempts"
               }. A question most of the class gets wrong is usually worth rereading.`}
-        </p>
-      </div>
+        </>
+      }
+    >
 
       {submittedCount > 0 && (
         <Card>
@@ -324,7 +328,7 @@ function QuestionAccuracy({
           </CardBody>
         </Card>
       )}
-    </section>
+    </Section>
   );
 }
 

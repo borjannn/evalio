@@ -143,8 +143,21 @@ Two things in that file are deliberate and easy to "fix" wrongly:
 - **There is no dark mode and no `prefers-color-scheme` block.** The token set is light-only; a dark
   block turns the page ground black while every card stays white.
 
-The page ground is `bg-slate-50` on `<body>` with white cards, so cards separate by value rather
-than by shadow. `--color-background` (#ffffff) is the card surface, not the page.
+The page ground is `--color-canvas` on `<body>` with white cards. `--color-background` (#ffffff) is
+the card surface, not the page. There is exactly **one** card shadow, `--shadow-card`, and it is
+structural rather than decorative — the original "zero drop-shadows" rule made screens read flat
+once they had three levels of nesting. Don't add a second, heavier one; `--shadow-raised` covers the
+hover lift on `<Card interactive>`, which is only for cards that are entirely a link.
+
+**Screens are built from `<PageHeader>` and `<Section>`** (`components/ui/section.tsx`), not from
+hand-rolled heading rows — that is how they were drifting apart. `<Section>`'s brand-coloured tick
+and hairline are the "highlighted section" affordance, and they deliberately do *not* box each
+section in its own card, which is what turns a page into a stack of unrelated widgets.
+
+Line heights live in `@theme` (`--text-sm--line-height: 1.5`), not on components. The base layer
+also sets a heading letter-spacing that **matches Tailwind's `tracking-tight` on purpose** — plenty
+of headings still carry that utility, and a different base value would make two adjacent headings
+sit differently depending on which one someone remembered to add the class to.
 
 **One brand colour, `#2563eb`, and it means "action".** `--color-primary`, `--color-accent` and
 `--color-ring` are all the same blue: primary buttons, the logo mark, links, active nav, focus
