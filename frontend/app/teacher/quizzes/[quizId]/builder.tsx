@@ -27,6 +27,7 @@ import {
   type QuizEditState,
 } from "./actions";
 import { BankPicker } from "./bank-picker";
+import { QuestionList } from "./question-list";
 import { QuestionRow } from "./question-row";
 
 /**
@@ -90,9 +91,6 @@ export function QuizBuilder({
     setSeenQuestions(quiz.questions);
     setOrder(quiz.questions);
   }
-
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const [detailsState, detailsAction, detailsPending] = useActionState<QuizEditState, FormData>(
     updateQuizDetails,
@@ -333,14 +331,15 @@ export function QuizBuilder({
             action={<Button onClick={() => setAddMode("write")}>Add the first question</Button>}
           />
         ) : (
-          <div className="space-y-3">
-            {order.map((question, index) =>
+          <QuestionList
+            items={order}
+            onReorder={move}
+            renderItem={(question, index, handle) =>
               // Editing replaces the row in place, so the sequence stays legible
               // and the form appears where the teacher was looking. It is the
               // same §5.4 form, which warns before changing a shared question.
               editing?.id === question.id ? (
                 <QuestionForm
-                  key={question.id}
                   topicId={quiz.topic}
                   bankId={editing.question_bank}
                   banks={banks}
@@ -350,27 +349,16 @@ export function QuizBuilder({
                 />
               ) : (
                 <QuestionRow
-                  key={question.id}
                   quizId={quiz.id}
                   question={question}
                   position={index + 1}
-                  total={order.length}
                   loadingEdit={loadingEditId === question.id}
-                  dragging={dragIndex === index}
-                  dropTarget={overIndex === index && dragIndex !== index}
+                  handle={handle}
                   onEdit={() => beginEdit(question.id)}
-                  onDragStart={() => setDragIndex(index)}
-                  onDragEnter={() => setOverIndex(index)}
-                  onDragEnd={() => {
-                    if (dragIndex !== null && overIndex !== null) move(dragIndex, overIndex);
-                    setDragIndex(null);
-                    setOverIndex(null);
-                  }}
-                  onMove={(delta) => move(index, index + delta)}
                 />
-              ),
-            )}
-          </div>
+              )
+            }
+          />
         )}
       </section>
     </div>

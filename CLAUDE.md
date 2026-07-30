@@ -163,6 +163,19 @@ teacher keeps open all day is noise. Every animation is mirrored in a
 `@media (prefers-reduced-motion: reduce)` block that collapses it to its finished state; that block
 is mandatory, not a nicety.
 
+Interaction feedback is a CSS `transition` on the component, always with
+`motion-reduce:transition-none`. ⚠️ **Tailwind v4 compiles `scale-*` to the standalone `scale`
+property, not to `transform`** — `transition-[transform]` on a scaled element animates nothing and
+it snaps instead. Name the property the utility actually sets.
+
+Reordering in the quiz builder lives in `app/teacher/quizzes/[quizId]/question-list.tsx`, which owns
+the drag mechanics and nothing else; `question-row.tsx` renders content and takes the grip's wiring
+as a `handle` prop. The model is an **insertion slot** (`0..n`, "goes before item *n*"), not a
+destination row — that is what the blue line draws, so the preview and the drop can't disagree, and
+both ends of the list are ordinary slots rather than special cases. The reorder is committed in
+`drop`, **never in `dragend`**: `dragend` fires on cancel too, so committing there makes Escape
+reorder the quiz anyway.
+
 The logo (`components/brand.tsx`) stroke-draws via `pathLength="1"`, which renormalises any SVG
 shape's length to 1 so a single `stroke-dasharray: 1` animates it without measuring geometry. Change
 the mark's shapes freely; the animation still works.

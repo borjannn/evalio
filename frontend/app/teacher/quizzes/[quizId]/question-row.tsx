@@ -10,84 +10,49 @@ import { cn } from "@/lib/cn";
 import type { QuizBuilderQuestion } from "@/lib/types";
 
 import { removeQuestionFromQuiz } from "./actions";
+import type { DragHandleProps } from "./question-list";
 
 /**
  * One question in the quiz, in the sequence a student will meet it.
  *
  * ⚠️ Teacher-only: renders `is_correct` and `feedback_text`.
+ *
+ * Reordering is not this component's job — `QuestionList` owns the drag state
+ * and the row's wrapper, and hands the grip its wiring as `handle`.
  */
 export function QuestionRow({
   quizId,
   question,
   position,
-  total,
   loadingEdit,
-  dragging,
-  dropTarget,
+  handle,
   onEdit,
-  onDragStart,
-  onDragEnter,
-  onDragEnd,
-  onMove,
 }: {
   quizId: number;
   question: QuizBuilderQuestion;
   /** 1-based, for display. */
   position: number;
-  total: number;
   /** Edit was clicked and the question's reuse counts are still loading. */
   loadingEdit: boolean;
-  dragging: boolean;
-  dropTarget: boolean;
+  handle: DragHandleProps;
   onEdit: () => void;
-  onDragStart: () => void;
-  onDragEnter: () => void;
-  onDragEnd: () => void;
-  onMove: (delta: -1 | 1) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  // A card that is `draggable` all the time swallows text selection, so the
-  // attribute is only switched on while the grip is held.
-  const [armed, setArmed] = useState(false);
 
   return (
-    <Card
-      draggable={armed}
-      onDragStart={onDragStart}
-      onDragEnter={onDragEnter}
-      // Without preventDefault the browser refuses the drop outright — this is
-      // the one non-obvious requirement of the HTML5 drag API.
-      onDragOver={(event) => event.preventDefault()}
-      onDragEnd={() => {
-        setArmed(false);
-        onDragEnd();
-      }}
-      className={cn(
-        "transition-colors",
-        dragging && "opacity-40",
-        dropTarget && "border-ring",
-      )}
-    >
+    <Card>
       <CardBody className="space-y-3">
         <div className="flex items-start gap-3">
           {/* A button, not a bare icon: dragging alone would make reordering
-              impossible without a mouse. Arrow keys do the same job. */}
+              impossible without a mouse. Arrow keys do the same job.
+
+              Pressing it is also what makes the row `draggable` — a card that
+              carries the attribute permanently swallows text selection, so the
+              grip arms it and `dragend` disarms it. */}
           <button
             type="button"
-            onMouseDown={() => setArmed(true)}
-            onMouseUp={() => setArmed(false)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowUp" && position > 1) {
-                event.preventDefault();
-                onMove(-1);
-              }
-              if (event.key === "ArrowDown" && position < total) {
-                event.preventDefault();
-                onMove(1);
-              }
-            }}
-            aria-label={`Question ${position} of ${total}. Use the arrow keys to move it.`}
+            {...handle}
             className="mt-0.5 cursor-grab rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:cursor-grabbing"
           >
             <GripVertical size={16} />
