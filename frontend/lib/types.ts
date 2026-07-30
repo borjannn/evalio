@@ -226,6 +226,37 @@ export type QuizBuilderQuestion = TeacherQuestion & {
 };
 
 /**
+ * `QuizStudentListSerializer` — GET /api/quizzes/ as a student, and what §7.1
+ * renders.
+ *
+ * Narrower than `Quiz`, not wider, which is why it doesn't extend it:
+ * `is_published` is always true here (only published quizzes reach a student at
+ * all) and `created_by` is not the student's business. Both are absent from the
+ * payload, so they must be absent from the type.
+ *
+ * The two attempt ids are the requesting student's own, as scalar subqueries, and
+ * are what §7.1's Not started / In progress / Completed is read from. They live
+ * here rather than being matched client-side against `GET /attempts/` because
+ * that list is paginated at 25: a student with more attempts than that would see
+ * finished quizzes reported as untouched.
+ *
+ * ⚠️ Ids only — no score, no correctness. This shape is read *before* a quiz is
+ * taken (§1).
+ */
+export type StudentQuizListItem = {
+  id: number;
+  title: string;
+  description: string;
+  topic_name: string;
+  question_count: number;
+  /** This student's in-progress attempt, if they have one. At most one exists. */
+  open_attempt_id: number | null;
+  /** Their most recent submitted attempt, if any. */
+  completed_attempt_id: number | null;
+  created_at: string;
+};
+
+/**
  * `QuizDetailStudentSerializer`. Note the different shape: questions are nested
  * under `quiz_questions`, and there is no `topic`, `is_published`, or author.
  * Not a subset of the teacher shape — don't try to unify them.

@@ -194,6 +194,29 @@ Type page, layout and route-handler props with the **globals** `PageProps<'/rout
 rather than by hand. They are global — don't import them. `npm run typecheck` runs typegen first for
 this reason; a bare `tsc --noEmit` on a clean checkout fails until types have been generated once.
 
+**The student flow is the one place a colour choice is a content decision.** In
+`app/student/attempts/[attemptId]/runner.tsx` the selected choice is marked in `foreground` — the
+body-text near-black — not in the brand blue and not in a semantic tone. Blue means "action"
+everywhere else in the app, so on a choice it reads as endorsement. Blue survives only on Next and
+Submit, and the answer-saved indicator is the plain word "Saved" with no variation. The navigator
+distinguishes answered from unanswered and nothing else. Checkmark iconography is banned outright
+before submission, so selection is a dot.
+
+Verifying that screen means **searching the RSC payload, not reading the JSX**: everything a Server
+Component passes to a Client Component is serialized and readable in DevTools whether or not
+anything renders it. `StudentChoice` carrying `is_correct?: never` is what makes a leak a build
+error; the payload grep is the check that it worked.
+
+The student shell (`components/student-header.tsx`) is a component the screens render, not a layout
+— the runner is an explicit exception to the nav (FRONTEND_PLAN §8) and a page cannot opt out of a
+layout. The alternative was a `(shell)` route group putting `attempts/[attemptId]` in two places in
+the tree to express one difference.
+
+**Every list screen needs `<Pager>`** (`components/ui/pager.tsx`). The API is `PageNumberPagination`
+at 25 with no way to ask for everything, so a list without one silently caps at row 25 and nothing
+on screen admits it. The student screens have it; the teacher screens **do not yet** — see
+`@PROJECT_ARCHITECTURE.md` Known gaps.
+
 **Auth is a BFF.** The JWT lives in two httpOnly cookies and never reaches JavaScript; `lib/api.ts`
 is the only module that talks to Django and is `import "server-only"`. Every protected page calls
 `requireTeacher()` or `requireStudent()` from `lib/auth.ts` — `proxy.ts` also redirects, but it only
@@ -227,7 +250,7 @@ Frontend: `npm run lint` and `npm run typecheck` from `frontend/`.
 
 ## Testing
 
-94 tests across five apps. Run the suite before finishing any backend change.
+97 tests across five apps. Run the suite before finishing any backend change.
 
 ```
 python manage.py test              # needs the database up, same as any other management command
@@ -238,7 +261,9 @@ python manage.py test attempts     # one app
   fallbacks, idempotent re-submission, and that editing or deleting a choice cannot rewrite or
   destroy a submitted attempt.
 - `quizzes/tests.py` — ownership isolation, many-banks-per-topic, choice diffing on edit, atomic
-  reorder, and the teacher-only count annotations. The N+1 guard on the quiz detail asserts that a
+  reorder, and both roles' count annotations — `StudentQuizListTests` covers the student list
+  shape, including that a student reached by two assignment routes at once still sees the quiz
+  once with a true question count. The N+1 guard on the quiz detail asserts that a
   2-question and an 8-question quiz cost the **same** number of queries, not an exact count — an
   exact number breaks on any unrelated change, and the invariant that matters is "doesn't grow".
 - `classes/tests.py` — the assignment target constraints (including the partial unique indexes),

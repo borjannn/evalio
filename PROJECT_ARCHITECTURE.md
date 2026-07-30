@@ -234,7 +234,11 @@ CRUD on `topics`, `question-banks`, `questions`, `quizzes`, plus:
 | GET | `/api/quizzes/{pk}/audience/` | Who the quiz's assignments reach. **Unpaginated** — a bare `{student_count, students}` |
 
 `topics`, `question-banks` and `questions` are teacher-only. `quizzes` list/retrieve serves both
-roles and switches serializer by role. `?search=` is supported on topics (name, description), banks
+roles and switches serializer by role — teachers get `QuizTeacherListSerializer` / `QuizDetailTeacherSerializer`,
+students `QuizStudentListSerializer` / `QuizDetailStudentSerializer`. The student shapes are
+**narrower, not subsets**: the list drops `is_published` (always true, since only published quizzes
+reach a student) and `created_by`, and the detail nests questions under `quiz_questions` with no
+topic or author. Don't try to unify them. `?search=` is supported on topics (name, description), banks
 (name) and questions (text); banks accept `?topic=`, and questions accept both `?question_bank=`
 (one bank) and `?topic=` (every bank in the topic — what the quiz builder's cross-bank picker
 searches, since a teacher remembers the question rather than where they filed it).
@@ -254,6 +258,15 @@ raises instead of returning null.
 | `quiz_usage_count` | `QuestionTeacherListSerializer` | questions list/retrieve, bank retrieve | Quizzes referencing the question |
 | `submitted_answer_count` | `QuestionTeacherListSerializer` | questions list/retrieve, bank retrieve | Answers on **submitted** attempts only |
 | `question_count`, `assignment_count` | `QuizTeacherListSerializer` | quizzes list, teacher only | Size and reach of the quiz |
+| `question_count` | `QuizStudentListSerializer` | quizzes list, student only | How long the quiz is |
+| `open_attempt_id`, `completed_attempt_id` | `QuizStudentListSerializer` | quizzes list, student only | The requesting student's own attempts on it |
+
+`open_attempt_id` and `completed_attempt_id` are `Subquery` scalars rather than joins, so neither
+can multiply `question_count` beside them and neither costs a query per row. They are what the
+student home screen turns into *Not started* / *In progress* / *Completed*; deriving that client-side
+from `GET /api/attempts/` would be wrong, because that list is paginated at 25 and a student with
+more attempts than that would see finished quizzes reported as untouched. ⚠️ Attempt **ids** only —
+no score and no correctness, since this shape is read before the quiz is taken.
 
 `question_bank_name` on `QuestionTeacherSerializer` is not an annotation but a read-only
 `source="question_bank.name"`. The quiz builder renders questions flat in quiz order, so the bank is
@@ -412,3 +425,8 @@ Not yet implemented. Listed so this document doesn't drift into describing inten
   only to same-origin Next route handlers, making `corsheaders` removable rather than merely
   outdated.
 - **No rate limiting** on login or registration.
+- **Teacher list screens have no pagination affordance.** Every list endpoint is
+  `PageNumberPagination` at 25 with no "return everything" option, so a teacher with more than 25
+  topics, banks, questions or students sees the first 25 and nothing on screen says so. The student
+  screens use `frontend/components/ui/pager.tsx`; the teacher dashboard, bank contents, roster and
+  both picker panels still need it (FRONTEND_PLAN §9).

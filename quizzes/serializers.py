@@ -148,6 +148,44 @@ class QuizTeacherListSerializer(QuizSerializer):
         fields = QuizSerializer.Meta.fields + ("question_count", "assignment_count")
 
 
+class QuizStudentListSerializer(serializers.ModelSerializer):
+    """List shape for the student's home screen (FRONTEND_PLAN §7.1).
+
+    Narrower than `QuizSerializer`, not wider: `is_published` and `created_by` are
+    dropped. Every quiz reaching a student is published by definition — that is
+    what `quizzes_assigned_to` filters on — so the flag would only ever read True,
+    and who wrote a quiz is not the student's business.
+
+    `question_count` is an annotation from the student branch of `get_queryset()`.
+    Like every other count in this file it must be `distinct=True`: the assignment
+    joins in `quizzes_assigned_to` multiply the question rows otherwise, and a
+    5-question quiz reachable through both a class and a group reports 10.
+
+    The two attempt ids are what §7.1's Not started / In progress / Completed
+    comes from. They are annotations rather than something the client derives by
+    also fetching `/attempts/`, because that list is paginated at 25 — a student
+    with more attempts than that would see finished quizzes reported as untouched,
+    and the bug would only appear for the busiest students.
+
+    ⚠️ Attempt *ids* only. No score and no correctness: this shape is read before
+    a quiz is taken, so anything derived from the answer key is out (§1).
+    """
+
+    topic_name = serializers.CharField(source="topic.name", read_only=True)
+    question_count = serializers.IntegerField(read_only=True)
+    # Null unless the requesting student has such an attempt. `allow_null` because
+    # the Subquery returns NULL, which IntegerField would otherwise reject.
+    open_attempt_id = serializers.IntegerField(read_only=True, allow_null=True)
+    completed_attempt_id = serializers.IntegerField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = Quiz
+        fields = (
+            "id", "title", "description", "topic_name", "question_count",
+            "open_attempt_id", "completed_attempt_id", "created_at",
+        )
+
+
 class QuizDetailTeacherSerializer(serializers.ModelSerializer):
     """Full quiz details for teachers with all questions and choices.
 

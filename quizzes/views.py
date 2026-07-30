@@ -1,4 +1,4 @@
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, OuterRef, Prefetch, Q, Subquery
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -14,6 +14,7 @@ from .serializers import (
     QuizDetailStudentSerializer,
     QuizDetailTeacherSerializer,
     QuizSerializer,
+    QuizStudentListSerializer,
     QuizTeacherListSerializer,
     TopicSerializer,
 )
@@ -226,7 +227,30 @@ class QuizViewSet(viewsets.ModelViewSet):
         # Students see only published quizzes assigned to them — see quizzes/selectors.py.
         from .selectors import quizzes_assigned_to
 
-        return quizzes_assigned_to(user).select_related("topic")
+        queryset = quizzes_assigned_to(user).select_related("topic")
+        if self.action == "list":
+            from attempts.models import QuizAttempt
+
+            # This student's own attempts on each quiz, as scalar subqueries. The
+            # student home screen turns them into Not started / In progress /
+            # Completed (FRONTEND_PLAN §7.1). Two subqueries rather than a join,
+            # so neither can multiply the question count below, and neither costs
+            # a query per row.
+            def latest_attempt(**filters):
+                return QuizAttempt.objects.filter(
+                    quiz=OuterRef("pk"), student=user, **filters
+                ).order_by("-started_at").values("pk")[:1]
+
+            # Same rule as the teacher branch above: annotate() adds a GROUP BY,
+            # which makes `QuerySet.ordered` False and silently breaks pagination,
+            # so order explicitly. distinct=True because quizzes_assigned_to joins
+            # through assignments and would otherwise multiply the question rows.
+            queryset = queryset.annotate(
+                question_count=Count("questions", distinct=True),
+                open_attempt_id=Subquery(latest_attempt(submitted_at__isnull=True)),
+                completed_attempt_id=Subquery(latest_attempt(submitted_at__isnull=False)),
+            ).order_by("-created_at")
+        return queryset
 
     def get_serializer_class(self):
         if self.action == "retrieve" and self.request.user.is_student:
@@ -235,6 +259,8 @@ class QuizViewSet(viewsets.ModelViewSet):
             return QuizDetailTeacherSerializer
         if self.action == "list" and self.request.user.is_teacher:
             return QuizTeacherListSerializer
+        if self.action == "list":
+            return QuizStudentListSerializer
         return QuizSerializer
 
     def get_permissions(self):

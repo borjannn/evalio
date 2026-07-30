@@ -320,6 +320,69 @@ class QuizListAnnotationTests(APITestCase):
             self.assertNotIn("assignment_count", row)
 
 
+class StudentQuizListTests(APITestCase):
+    """`QuizStudentListSerializer` — what /student renders (FRONTEND_PLAN §7.1).
+
+    The subject badge and question count come from here. The count is the same
+    annotation trap as the teacher list, made worse: `quizzes_assigned_to` joins
+    through assignments, so a student reached by two routes at once multiplies
+    the question rows unless the count is distinct.
+    """
+
+    def setUp(self):
+        from classes.models import Class, Enrollment, QuizAssignment
+
+        self.teacher = make_teacher()
+        self.student = make_student()
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        bank = QuestionBank.objects.create(topic=self.topic, name="Bank")
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", created_by=self.teacher, is_published=True
+        )
+        for index in range(3):
+            question = Question.objects.create(
+                question_bank=bank, text=f"Q{index}", created_by=self.teacher
+            )
+            self.quiz.quizquestion_set.create(question=question, order=index)
+
+        # Reached twice over: named individually *and* through their class.
+        school_class = Class.objects.create(
+            name="5A", school_year="2025/2026", created_by=self.teacher
+        )
+        Enrollment.objects.create(student=self.student, school_class=school_class)
+        QuizAssignment.objects.create(
+            quiz=self.quiz, school_class=school_class, assigned_by=self.teacher
+        )
+        QuizAssignment.objects.create(
+            quiz=self.quiz, student=self.student, assigned_by=self.teacher
+        )
+
+        self.client.force_authenticate(self.student)
+
+    def test_reaching_a_student_twice_lists_the_quiz_once_with_a_true_count(self):
+        response = self.client.get("/api/quizzes/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+
+        row = response.data["results"][0]
+        self.assertEqual(row["question_count"], 3)  # 3, not 6
+        self.assertEqual(row["topic_name"], "Hardware")
+
+    def test_the_answer_key_is_nowhere_in_the_list(self):
+        response = self.client.get("/api/quizzes/")
+        row = response.data["results"][0]
+        # Narrower than the teacher shape on purpose — see the serializer docblock.
+        for field in ("is_published", "created_by", "assignment_count"):
+            self.assertNotIn(field, row)
+
+    def test_an_unpublished_quiz_is_absent_even_when_assigned(self):
+        self.quiz.is_published = False
+        self.quiz.save(update_fields=["is_published"])
+
+        response = self.client.get("/api/quizzes/")
+        self.assertEqual(response.data["results"], [])
+
+
 class QuestionReuseCountTests(APITestCase):
     """The question form warns before editing a shared question, using these counts.
 
