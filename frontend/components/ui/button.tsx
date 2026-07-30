@@ -34,7 +34,14 @@ export function Button({
       // surprise when the element is only meant to open a panel.
       type={type}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-colors",
+        "inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium",
+        // `transition-all`, not `transition-colors`: the press below moves the
+        // button, and a colour-only transition would snap it.
+        "transition-all duration-150",
+        // Tactile press. A button that visibly gives under the cursor reads as a
+        // physical control; 1px is enough and costs no layout, since translate
+        // and scale are both compositor-only.
+        "active:translate-y-px active:scale-[0.99]",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "disabled:pointer-events-none disabled:opacity-50",
         variants[variant],

@@ -35,9 +35,11 @@ export function NavLink({
       className={cn(
         "rounded-md px-3 py-2 transition-colors",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        // Tinted with the brand colour rather than filled grey. `aria-current`
+        // above is what actually conveys "you are here"; this is the visual echo.
         active
-          ? "bg-secondary text-secondary-foreground"
-          : "hover:bg-secondary/50 hover:text-foreground",
+          ? "bg-primary/10 text-primary"
+          : "hover:bg-secondary hover:text-foreground",
       )}
     >
       {children}

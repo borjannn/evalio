@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Brand } from "@/components/brand";
 import { Card } from "@/components/ui/card";
 import { getUser, homeFor } from "@/lib/auth";
 
@@ -13,7 +14,9 @@ export default async function RegisterPage() {
   if (user) redirect(homeFor(user));
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 p-4">
+      <Brand size="lg" />
+
       <Card className="w-full max-w-md p-8">
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">Create a student account</h1>

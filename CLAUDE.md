@@ -143,8 +143,29 @@ Two things in that file are deliberate and easy to "fix" wrongly:
 - **There is no dark mode and no `prefers-color-scheme` block.** The token set is light-only; a dark
   block turns the page ground black while every card stays white.
 
-The page ground is `bg-neutral-50` on `<body>` with white cards, so cards separate by value rather
+The page ground is `bg-slate-50` on `<body>` with white cards, so cards separate by value rather
 than by shadow. `--color-background` (#ffffff) is the card surface, not the page.
+
+**One brand colour, `#2563eb`, and it means "action".** `--color-primary`, `--color-accent` and
+`--color-ring` are all the same blue: primary buttons, the logo mark, links, active nav, focus
+rings. The greys are slate rather than neutral so they share its cool cast. Green and red survive
+only as *semantic* status (Published/Draft, destructive), never as decoration.
+
+⚠️ **Colour may never distinguish a quiz choice in the student flow before submission**
+(FRONTEND_PLAN §1, Guidelines §6.1). The blue is for actions; correctness is never a colour until
+the feedback screen. Adding a `tone` to a component that a student sees mid-quiz breaks the core
+content rule.
+
+**Motion is CSS keyframes in `globals.css`, not a library.** All of it is one-shot load-in
+(`logo-stroke`, `logo-letter`, `page-enter`), which `animation-delay` cascades already do — Motion
+or GSAP would add ~30kB to reach the same place. Nothing loops: a perpetual animation in a tool a
+teacher keeps open all day is noise. Every animation is mirrored in a
+`@media (prefers-reduced-motion: reduce)` block that collapses it to its finished state; that block
+is mandatory, not a nicety.
+
+The logo (`components/brand.tsx`) stroke-draws via `pathLength="1"`, which renormalises any SVG
+shape's length to 1 so a single `stroke-dasharray: 1` animates it without measuring geometry. Change
+the mark's shapes freely; the animation still works.
 
 **Pin TypeScript to `^6`.** Next 16's built-in type checker cannot use TS 7 — `next build` exits and
 tells you to enable `experimental.useTypeScriptCli` — and `@typescript-eslint` peer-requires

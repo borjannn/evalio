@@ -16,15 +16,18 @@ import { Field, Input, Textarea } from "@/components/ui/field";
 
 export const metadata = { title: "Design system — Evalio" };
 
+// The hexes are labels, not the source of truth — @theme in globals.css is.
+// Keep them in step with it; a swatch board that lies is worse than none.
 const swatches = [
   { name: "background", className: "bg-background", hex: "#ffffff" },
-  { name: "secondary", className: "bg-secondary", hex: "#f5f5f5" },
-  { name: "muted", className: "bg-muted", hex: "#e5e5e5" },
-  { name: "foreground", className: "bg-foreground", hex: "#171717" },
-  { name: "muted-foreground", className: "bg-muted-foreground", hex: "#737373" },
-  { name: "accent", className: "bg-accent", hex: "#3b82f6" },
-  { name: "border", className: "bg-border", hex: "#d4d4d4" },
-  { name: "ring", className: "bg-ring", hex: "#a3a3a3" },
+  { name: "secondary", className: "bg-secondary", hex: "#f1f5f9" },
+  { name: "muted", className: "bg-muted", hex: "#e2e8f0" },
+  { name: "foreground", className: "bg-foreground", hex: "#0f172a" },
+  { name: "muted-foreground", className: "bg-muted-foreground", hex: "#64748b" },
+  { name: "primary", className: "bg-primary", hex: "#2563eb" },
+  { name: "accent", className: "bg-accent", hex: "#2563eb" },
+  { name: "border", className: "bg-border", hex: "#dbe2ea" },
+  { name: "ring", className: "bg-ring", hex: "#2563eb" },
 ];
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

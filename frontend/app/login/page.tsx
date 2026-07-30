@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Brand } from "@/components/brand";
 import { Card } from "@/components/ui/card";
 import { getUser, homeFor } from "@/lib/auth";
 
@@ -23,10 +24,14 @@ export default async function LoginPage({
   if (user) redirect(homeFor(user));
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 p-4">
+      {/* The wordmark is the subject here, not a nav item, so it sits above the
+          card at `lg` and draws itself as the page arrives. */}
+      <Brand size="lg" />
+
       <Card className="w-full max-w-sm p-8">
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">Sign in to Evalio</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Welcome back. Please enter your details.
           </p>

@@ -16,23 +16,33 @@
 
   /* Background & surface */
   --color-background: #ffffff;
-  --color-secondary: #f5f5f5;
-  --color-secondary-foreground: #171717;
-  --color-muted: #e5e5e5;
+  --color-secondary: #f1f5f9;
+  --color-secondary-foreground: #0f172a;
+  --color-muted: #e2e8f0;
 
-  /* Foreground & typography */
-  --color-foreground: #171717;
-  --color-muted-foreground: #737373;
-  --color-primary: #171717;
+  /* Foreground & typography.
+     Slate rather than pure neutral: the greys carry a trace of blue, so the
+     accent below reads as part of the palette instead of a sticker on top of it.
+     One family throughout — do not mix warm and cool greys. */
+  --color-foreground: #0f172a;
+  --color-muted-foreground: #64748b;
+
+  /* ONE brand colour, used everywhere it appears: primary buttons, the logo
+     mark, links, active nav, focus rings. Blue-600. Not blue-500 — that reads
+     candy against white, and #2563eb clears WCAG AA both ways (5.17:1 on white,
+     and white text on it).
+
+     ⚠️ It must never distinguish a quiz choice in the student flow before
+     submission (FRONTEND_PLAN §1, Guidelines §6.1). Colour is for *actions*
+     here, never for correctness. */
+  --color-primary: #2563eb;
   --color-primary-foreground: #ffffff;
-
-  /* Accent & feedback — used extremely sparingly */
-  --color-accent: #3b82f6;
+  --color-accent: #2563eb;
   --color-accent-foreground: #ffffff;
 
   /* Borders & structure */
-  --color-border: #d4d4d4;
-  --color-ring: #a3a3a3;
+  --color-border: #dbe2ea;
+  --color-ring: #2563eb;
 }
 
 @layer base {
@@ -53,3 +63,89 @@
 /* There is no dark mode. The token set above is light-only, so a
    prefers-color-scheme block would turn the page ground black while every card
    stayed white. The scaffold shipped with one; it was removed deliberately. */
+
+/* ---------------------------------------------------------------------------
+   Motion.
+
+   CSS keyframes rather than a library: the only motion in the app is one-shot
+   load-in, which `animation-delay` cascades handle natively. Adding Motion or
+   GSAP would put ~30kB in the bundle to do what four keyframes already do.
+
+   Everything animates `transform` and `opacity` only (plus stroke-dashoffset,
+   which the compositor also handles), so nothing triggers layout.
+
+   Every animation below is one-shot. Nothing loops — a perpetual animation in a
+   tool a teacher keeps open all day is noise, not polish.
+   --------------------------------------------------------------------------- */
+
+@keyframes evalio-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes evalio-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.35em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes evalio-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer components {
+  /* Stroke-drawn logo geometry. `pathLength="1"` on the SVG element normalises
+     every shape to a length of 1, so one dasharray works for both the ring and
+     the check without measuring either. */
+  .logo-stroke {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: evalio-draw 0.9s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+  }
+
+  .logo-letter {
+    display: inline-block;
+    opacity: 0;
+    animation: evalio-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* One-shot entrance for a page's main content. Deliberately short and small:
+     it acknowledges the load, it doesn't perform. */
+  .page-enter {
+    animation: evalio-fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+/* Mandatory, not a nicety. Everything above collapses to its finished state —
+   the logo appears fully drawn rather than half-drawn. */
+@media (prefers-reduced-motion: reduce) {
+  .logo-stroke,
+  .logo-letter,
+  .page-enter {
+    animation: none;
+  }
+
+  .logo-stroke {
+    stroke-dashoffset: 0;
+  }
+
+  .logo-letter {
+    opacity: 1;
+  }
+}

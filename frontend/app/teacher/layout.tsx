@@ -1,6 +1,7 @@
 import { LogOut } from "lucide-react";
 import Link from "next/link";
 
+import { Brand } from "@/components/brand";
 import { NavLink } from "@/components/nav-link";
 import { logout } from "@/lib/actions";
 import { requireTeacher } from "@/lib/auth";
@@ -23,14 +24,18 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-10 border-b border-border bg-white">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+      {/* Translucent + blurred rather than solid: content scrolling under the
+          header stays faintly visible, which is what makes a sticky bar read as
+          a layer instead of a lid. */}
+      <header className="sticky top-0 z-10 border-b border-border bg-white/80 backdrop-blur-md">
+        <div className="mx-auto flex h-[72px] max-w-6xl items-center justify-between px-4">
           <div className="flex items-center gap-8">
             <Link
               href="/teacher"
-              className="text-lg font-bold tracking-tight focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              aria-label="Evalio home"
+              className="rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              Evalio
+              <Brand />
             </Link>
             <nav className="flex items-center gap-1 text-sm font-medium text-muted-foreground">
               <NavLink href="/teacher" exact>
@@ -58,7 +63,9 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
+      <main className="page-enter mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+        {children}
+      </main>
     </div>
   );
 }
