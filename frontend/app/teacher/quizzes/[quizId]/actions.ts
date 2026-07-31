@@ -8,7 +8,7 @@ import { requireTeacher } from "@/lib/auth";
 import type { Paginated, Quiz, TeacherQuestionWithUsage } from "@/lib/types";
 
 /**
- * Quiz builder mutations — FRONTEND_PLAN §5.3.
+ * Quiz builder mutations — docs/FRONTEND.md §8.
  *
  * Every one re-checks the role, because a `"use server"` module is a set of
  * public HTTP endpoints. Ownership stays Django's job: another teacher's quiz
@@ -76,7 +76,7 @@ export async function deleteQuiz(formData: FormData): Promise<void> {
 }
 
 /**
- * Add an existing bank question to the quiz — the §5.5 picker's "+".
+ * Add an existing bank question to the quiz — the docs/FRONTEND.md §8 picker's "+".
  *
  * Returns state rather than throwing on the expected failures so the picker can
  * stay open and say what happened: 400 is "already in this quiz", 404 is a
@@ -159,7 +159,7 @@ export async function reorderQuestions(
  * `QuestionTeacherSerializer`, which carries no annotations — the objects come
  * off `quizquestion_set` and were never annotated. So the builder has the
  * question but not `quiz_usage_count` / `submitted_answer_count`, and those are
- * what make §5.4's shared-question warning concrete instead of vague.
+ * what make docs/FRONTEND.md §9's shared-question warning concrete instead of vague.
  *
  * Fetching on click rather than annotating the quiz detail: the warning is
  * needed once per edit, and paying for it on every page load of a 20-question
@@ -171,7 +171,7 @@ export async function loadQuestionForEdit(id: number): Promise<TeacherQuestionWi
 }
 
 /**
- * The bank picker's search — FRONTEND_PLAN §5.5.
+ * The bank picker's search — docs/FRONTEND.md §8.
  *
  * Server-side rather than filtering an already-loaded array, because
  * `/api/questions/` is paginated at 25. Filtering the first page on the client

@@ -318,10 +318,175 @@ class QuizListAnnotationTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         for row in response.data["results"]:
             self.assertNotIn("assignment_count", row)
+            self.assertNotIn("attempt_count", row)
+
+
+def submitted_attempt(quiz, student, score=100.0):
+    """A finished attempt: submitted *and* scored, which is what makes it count.
+
+    Both halves matter — `attempt_count` and the statistics screen agree that an
+    attempt without a `FeedbackResult` is not a result, so a fixture that stamps
+    `submitted_at` alone would silently test nothing.
+    """
+    from django.utils import timezone
+
+    from attempts.models import QuizAttempt
+    from feedback.models import FeedbackResult
+
+    attempt = QuizAttempt.objects.create(
+        quiz=quiz, student=student, submitted_at=timezone.now()
+    )
+    FeedbackResult.objects.create(
+        attempt=attempt, score_percent=score, correct_count=1, total_count=1
+    )
+    return attempt
+
+
+class AttemptCountAnnotationTests(APITestCase):
+    """`attempt_count` on the topic card (/teacher) and the quiz table (/teacher/topics/{id}).
+
+    Two properties, and both are easy to break by "simplifying":
+
+    1. It is a **subquery**, not a third `Count(distinct=True)` beside the other
+       two — see `views.submitted_attempt_count_subquery`. That makes it immune
+       to the join multiplication the counts beside it have to defend against, so
+       the number must not move when a quiz gains questions or assignments, and
+       must not split into one row per attempt.
+    2. It counts **submitted** attempts, the same set `/api/analytics/` reports
+       on. The whole point of the number is telling a teacher which topics have
+       statistics worth opening, so a card that counted a wider set than that
+       screen would be sending them somewhere that disagrees with it.
+    """
+
+    def setUp(self):
+        from attempts.models import QuizAttempt
+
+        self.teacher = make_teacher()
+        self.client.force_authenticate(self.teacher)
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Bank")
+
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", is_published=True, created_by=self.teacher
+        )
+        # Two questions and two assignments, so a join-based count would multiply.
+        for index in range(2):
+            question = Question.objects.create(
+                question_bank=self.bank, text=f"Q{index}", created_by=self.teacher
+            )
+            self.quiz.quizquestion_set.create(question=question, order=index)
+
+        from classes.models import Class, QuizAssignment
+
+        for name in ("5A", "5B"):
+            school_class = Class.objects.create(
+                name=name, school_year="2025/2026", created_by=self.teacher
+            )
+            QuizAssignment.objects.create(
+                quiz=self.quiz, school_class=school_class, assigned_by=self.teacher
+            )
+
+        # Two finished attempts, plus one still open that must not be counted.
+        for index in range(2):
+            submitted_attempt(self.quiz, make_student(f"student{index}"))
+        QuizAttempt.objects.create(quiz=self.quiz, student=make_student("midway"))
+
+    def test_quiz_row_counts_each_submitted_attempt_once(self):
+        response = self.client.get("/api/quizzes/")
+        row = next(r for r in response.data["results"] if r["title"] == "Unit 1")
+
+        # 2, not 8 (2 attempts x 2 questions x 2 assignments) and not 1.
+        self.assertEqual(row["attempt_count"], 2)
+        self.assertEqual(row["question_count"], 2)
+        self.assertEqual(row["assignment_count"], 2)
+
+    def test_topic_card_sums_attempts_across_its_quizzes(self):
+        second = Quiz.objects.create(
+            topic=self.topic, title="Unit 2", created_by=self.teacher
+        )
+        submitted_attempt(second, make_student("late"))
+
+        response = self.client.get("/api/topics/")
+        row = next(r for r in response.data["results"] if r["name"] == "Hardware")
+
+        self.assertEqual(row["attempt_count"], 3)
+        self.assertEqual(row["quiz_count"], 2)
+        self.assertEqual(row["question_bank_count"], 1)
+
+    def test_in_progress_attempts_are_not_counted(self):
+        """An unfinished attempt has no score and appears nowhere in the statistics.
+
+        `setUp` leaves one open attempt on this quiz. Counting it would make the
+        card promise a screen with more on it than the screen actually has.
+        """
+        from attempts.models import QuizAttempt
+
+        self.assertEqual(
+            QuizAttempt.objects.filter(quiz=self.quiz, submitted_at__isnull=True).count(), 1
+        )
+        response = self.client.get("/api/quizzes/")
+        row = next(r for r in response.data["results"] if r["title"] == "Unit 1")
+        self.assertEqual(row["attempt_count"], 2)
+
+    def test_a_submitted_attempt_without_feedback_is_not_counted(self):
+        """`SubmitAttemptView` writes `submitted_at` and the feedback in two steps.
+
+        Nothing wraps them in a transaction, so a request that dies in between
+        leaves a submitted attempt with no score. `analytics` filters those out;
+        so does this, or the card would count a row the statistics never show.
+        """
+        from django.utils import timezone
+
+        from attempts.models import QuizAttempt
+
+        QuizAttempt.objects.create(
+            quiz=self.quiz, student=make_student("halfwritten"), submitted_at=timezone.now()
+        )
+
+        response = self.client.get("/api/quizzes/")
+        row = next(r for r in response.data["results"] if r["title"] == "Unit 1")
+        self.assertEqual(row["attempt_count"], 2)
+
+    def test_agrees_with_the_analytics_endpoint(self):
+        """The card and the screen it advertises must report the same number.
+
+        This is the test that fails if either definition drifts, which is the
+        only reason the duplication in `submitted_attempt_count_subquery` is
+        tolerable.
+        """
+        quizzes = self.client.get("/api/quizzes/").data["results"]
+        card = next(r for r in quizzes if r["title"] == "Unit 1")
+
+        analytics = self.client.get("/api/analytics/?group_by=quiz").data
+        self.assertEqual(card["attempt_count"], analytics["summary"]["attempt_count"])
+
+    def test_zero_rather_than_null_when_nothing_has_been_attempted(self):
+        untouched = Topic.objects.create(name="Empty", created_by=self.teacher)
+        Quiz.objects.create(topic=untouched, title="Nobody", created_by=self.teacher)
+
+        topics = self.client.get("/api/topics/").data["results"]
+        self.assertEqual(next(r for r in topics if r["name"] == "Empty")["attempt_count"], 0)
+
+        quizzes = self.client.get("/api/quizzes/").data["results"]
+        self.assertEqual(next(r for r in quizzes if r["title"] == "Nobody")["attempt_count"], 0)
+
+    def test_another_teachers_attempts_are_not_counted(self):
+        """The ownership filter runs before the annotation, so there is nothing to leak.
+
+        Asserted anyway: this is a count of *other people's students' activity*,
+        and a regression here would be invisible on screen — a plausible-looking
+        number rather than a missing one.
+        """
+        intruder = make_teacher("intruder")
+        their_topic = Topic.objects.create(name="Theirs", created_by=intruder)
+        Quiz.objects.create(topic=their_topic, title="Secret", created_by=intruder)
+
+        names = [row["name"] for row in self.client.get("/api/topics/").data["results"]]
+        self.assertNotIn("Theirs", names)
 
 
 class StudentQuizListTests(APITestCase):
-    """`QuizStudentListSerializer` — what /student renders (FRONTEND_PLAN §7.1).
+    """`QuizStudentListSerializer` — what /student renders (docs/FRONTEND.md §7).
 
     The subject badge and question count come from here. The count is the same
     annotation trap as the teacher list, made worse: `quizzes_assigned_to` joins
@@ -539,7 +704,7 @@ class BankListAnnotationTests(APITestCase):
 
 
 class QuizBuilderPayloadTests(APITestCase):
-    """What the quiz builder reads: FRONTEND_PLAN §5.3 and the §5.5 bank picker."""
+    """What the quiz builder reads: docs/FRONTEND.md §8 and the docs/FRONTEND.md §8 bank picker."""
 
     def setUp(self):
         self.teacher = make_teacher()
@@ -607,7 +772,7 @@ class QuizBuilderPayloadTests(APITestCase):
         return len(captured)
 
     def test_questions_can_be_searched_across_every_bank_in_a_topic(self):
-        # §5.5: a teacher remembers the question, not which bank it is in.
+        # docs/FRONTEND.md §8: a teacher remembers the question, not which bank it is in.
         self._question(self.storage, "Which unit is the largest?")
         self._question(self.devices, "Which device is largest?")
         self._question(self.storage, "Unrelated")
@@ -645,7 +810,7 @@ class QuizBuilderPayloadTests(APITestCase):
 
 
 class QuizResultsTests(APITestCase):
-    """`GET /api/quizzes/{id}/results/` — the §5.11 screen's whole payload.
+    """`GET /api/quizzes/{id}/results/` — the docs/FRONTEND.md §7 screen's whole payload.
 
     Three things here are easy to get quietly wrong, and all three are the kind
     of wrong a teacher would act on: pooling a shared question's answers across

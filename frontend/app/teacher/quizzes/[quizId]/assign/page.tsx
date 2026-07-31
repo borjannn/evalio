@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ApiError, apiGet } from "@/lib/api";
+import { ApiError, apiGet, apiGetAll } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
 import type {
-  Paginated,
   Quiz,
   QuizAssignment,
   QuizAudience,
@@ -26,7 +25,18 @@ export async function generateMetadata({
   }
 }
 
-/** FRONTEND_PLAN §5.8 — who gets this quiz, at three targeting levels. */
+/**
+ * docs/FRONTEND.md §7 — who gets this quiz, at three targeting levels.
+ *
+ * ⚠️ **Deliberately unpaginated.** Nothing on this screen is a list being read;
+ * every row is a checkbox, and the state of each one is a diff against the
+ * assignments that exist. Paged at 25 both halves of that go wrong: a class on
+ * page 2 is simply unassignable, and — worse — an assignment row on page 2 makes
+ * an *already assigned* class render unticked, so ticking it posts a duplicate
+ * the database rejects. Same category as `audience/`, which is unpaginated for
+ * the same reason: a subset of a set you are diffing against is not a smaller
+ * answer, it is a wrong one.
+ */
 export default async function AssignPage({
   params,
 }: PageProps<"/teacher/quizzes/[quizId]/assign">) {
@@ -45,9 +55,9 @@ export default async function AssignPage({
   // recomputed on every assignment change rather than adjusted on the client,
   // because overlapping targets make the arithmetic non-obvious.
   const [classes, groups, assignments, audience] = await Promise.all([
-    apiGet<Paginated<SchoolClass>>("/classes/"),
-    apiGet<Paginated<TeachingGroup>>("/groups/"),
-    apiGet<Paginated<QuizAssignment>>(`/assignments/?quiz=${quizId}`),
+    apiGetAll<SchoolClass>("/classes/"),
+    apiGetAll<TeachingGroup>("/groups/"),
+    apiGetAll<QuizAssignment>(`/assignments/?quiz=${quizId}`),
     apiGet<QuizAudience>(`/quizzes/${quizId}/audience/`),
   ]);
 
@@ -62,9 +72,9 @@ export default async function AssignPage({
 
       <AssignScreen
         quiz={quiz}
-        classes={classes.results}
-        groups={groups.results}
-        assignments={assignments.results}
+        classes={classes}
+        groups={groups}
+        assignments={assignments}
         audience={audience}
       />
     </div>

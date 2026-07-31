@@ -22,13 +22,14 @@ import type {
 
 import {
   enrollStudent,
+  inviteStudentByUsername,
   removeEnrollment,
   setGroupMembership,
   updateClass,
   type ClassFormState,
 } from "../actions";
 
-/** FRONTEND_PLAN §5.10. */
+/** docs/FRONTEND.md §7. */
 export function Roster({
   schoolClass,
   enrollments,
@@ -102,7 +103,7 @@ export function Roster({
               type="button"
               onClick={() => setEditing(true)}
               aria-label="Edit class name and year"
-              className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="pressable rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
               <Pencil size={16} />
             </button>
@@ -226,7 +227,7 @@ function RosterRow({
             type="button"
             onClick={() => setConfirming(true)}
             aria-label={`Remove ${name || student.username} from the class`}
-            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="pressable rounded-md p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             <X size={16} />
           </button>
@@ -333,7 +334,7 @@ function GroupRoster({
 }
 
 /**
- * Scoped student search — §5.10's add panel.
+ * Scoped student search — docs/FRONTEND.md §7's add panel.
  *
  * Already-enrolled students appear **disabled rather than hidden**, so the
  * teacher can see the search worked rather than wondering whether the name was
@@ -355,6 +356,14 @@ function AddStudents({
   const [added, setAdded] = useState<number[]>([]);
   const [searching, startSearch] = useTransition();
   const [, startAdd] = useTransition();
+
+  // The invite path is separate state from the search: they are two different
+  // questions ("who do I already have?" vs "add exactly this person"), and
+  // sharing one input would make the exact-match rule invisible.
+  const [invite, setInvite] = useState("");
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [invited, setInvited] = useState<StudentSummary[]>([]);
+  const [inviting, startInvite] = useTransition();
 
   // Debounced in a ref, not an effect — the trigger is a keystroke, so there is
   // nothing for an effect to synchronise with.
@@ -388,7 +397,22 @@ function AddStudents({
     });
   }
 
-  const inClass = new Set([...enrolled, ...added]);
+  function sendInvite() {
+    const username = invite.trim();
+    if (!username) return;
+    setInviteError(null);
+    startInvite(async () => {
+      const outcome = await inviteStudentByUsername(schoolClassId, username);
+      if (outcome.error) {
+        setInviteError(outcome.error);
+        return;
+      }
+      if (outcome.student) setInvited((current) => [...current, outcome.student!]);
+      setInvite("");
+    });
+  }
+
+  const inClass = new Set([...enrolled, ...added, ...invited.map((s) => s.id)]);
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-white p-6">
@@ -423,15 +447,15 @@ function AddStudents({
       <div aria-busy={searching} className="space-y-2">
         {results === null ? null : results.length === 0 ? (
           // The scope is narrower than "no match" suggests, and a teacher who
-          // knows the student exists deserves to know why they can't see them.
-          // See PROJECT_ARCHITECTURE "Known gaps" — there is currently no route
-          // from a self-registered account onto a first roster.
+          // knows the student exists deserves to know why they can't see them —
+          // and what to do instead. This used to end at "an administrator has to
+          // place them in a class first", which was true and useless.
           <div className="space-y-2 py-6 text-center">
             <p className="text-sm text-muted-foreground">Nobody matches that.</p>
             <p className="mx-auto max-w-sm text-xs text-muted-foreground">
-              Search only covers students already enrolled in one of your classes, so a
-              student who has just registered won&apos;t appear. An administrator has to
-              place them in a class first.
+              Search only covers students already in one of your classes, so someone
+              who has just registered won&apos;t appear. Add them by their exact
+              username below.
             </p>
           </div>
         ) : (
@@ -471,11 +495,89 @@ function AddStudents({
         )}
       </div>
 
+      {/* The way onto a first roster. Deliberately an exact username and not a
+          second search box: the directory search is scoped so that no teacher
+          account can enumerate students, and a fuzzy match here would hand back
+          exactly that. Typing a full username is the price of not having one. */}
+      <div className="space-y-3 border-t border-border pt-4">
+        <div className="max-w-md space-y-1.5">
+          <Label htmlFor="student-invite">Add by username</Label>
+          <div className="flex gap-3">
+            <Input
+              id="student-invite"
+              value={invite}
+              onChange={(event) => {
+                setInvite(event.target.value);
+                setInviteError(null);
+              }}
+              onKeyDown={(event) => {
+                // Enter submits. This is not a <form>: the panel already sits
+                // inside the roster's markup and a nested form would be invalid.
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  sendInvite();
+                }
+              }}
+              placeholder="e.g. gpetrov"
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+            />
+            <Button
+              variant="secondary"
+              onClick={sendInvite}
+              disabled={inviting || !invite.trim()}
+              className="shrink-0"
+            >
+              {inviting ? "Adding…" : "Add"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The whole username, spelled exactly. Ask the student for theirs — it is on
+            their account, and there is no way to look one up.
+          </p>
+        </div>
+
+        {inviteError && (
+          <p role="alert" aria-live="polite" className="text-sm text-red-600">
+            {inviteError}
+          </p>
+        )}
+
+        {invited.length > 0 && (
+          <ul aria-live="polite" className="space-y-2">
+            {invited.map((student) => {
+              const name =
+                [student.first_name, student.last_name].filter(Boolean).join(" ") ||
+                student.username;
+              return (
+                <li
+                  key={student.id}
+                  className="flex items-center gap-3 rounded-md border border-border p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm">{name}</p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {student.username}
+                    </p>
+                  </div>
+                  <Badge tone="success" className="shrink-0">
+                    <Check size={12} />
+                    Added
+                  </Badge>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
       <div className="flex items-center gap-3 border-t border-border pt-4">
         <Button onClick={onDone}>Done</Button>
-        {added.length > 0 && (
+        {added.length + invited.length > 0 && (
           <span className="text-sm text-muted-foreground">
-            {added.length} {added.length === 1 ? "student" : "students"} added.
+            {added.length + invited.length}{" "}
+            {added.length + invited.length === 1 ? "student" : "students"} added.
           </span>
         )}
       </div>

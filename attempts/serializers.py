@@ -33,7 +33,7 @@ class AnswerResponseSerializer(serializers.ModelSerializer):
 
 
 class AnswerResponseTeacherSerializer(serializers.ModelSerializer):
-    """The teacher half of the pair — FRONTEND_PLAN §5.12.
+    """The teacher half of the pair — docs/FRONTEND.md §7.
 
     This is the **only** serializer that exposes `AnswerResponse`'s snapshot
     fields, and it must never reach a student endpoint. `choice_feedback_text` is

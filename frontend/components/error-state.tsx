@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 /**
- * The shared recoverable-error screen — FRONTEND_PLAN §9: "inline and
+ * The shared recoverable-error screen — docs/FRONTEND.md §5: "inline and
  * recoverable, never a blank screen; include retry".
  *
  * `"use client"` because every `error.tsx` is a Client Component — React error

@@ -7,10 +7,10 @@ import { logout } from "@/lib/actions";
 import type { User } from "@/lib/types";
 
 /**
- * The student shell's header — `Quizzes` · `History` · sign out (§8).
+ * The student shell's header — `Quizzes` · `History` · sign out (docs/FRONTEND.md §6).
  *
- * A component the screens render rather than a layout, because §8 makes the
- * runner (§7.3) an explicit exception: a student who navigates away mid-attempt
+ * A component the screens render rather than a layout, because docs/FRONTEND.md §6 makes the
+ * runner (docs/FRONTEND.md §6) an explicit exception: a student who navigates away mid-attempt
  * loses their place, so it shows a stripped header of its own instead. A layout
  * would wrap the runner too, and there is no way for a page to opt out of one.
  *
@@ -49,7 +49,7 @@ export function StudentHeader({ user }: { user: User }) {
               type="submit"
               title="Sign out"
               aria-label="Sign out"
-              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="pressable rounded-full p-2 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
               <LogOut size={18} />
             </button>
@@ -60,7 +60,7 @@ export function StudentHeader({ user }: { user: User }) {
   );
 }
 
-/** The shelled student screens' page frame. Narrower than the teacher's — §4. */
+/** The shelled student screens' page frame. Narrower than the teacher's — docs/FRONTEND.md §5. */
 export function StudentShell({
   user,
   children,

@@ -7,9 +7,9 @@ import type { QuizAttempt, QuizDetailStudent } from "@/lib/types";
 import { Runner } from "./runner";
 
 /**
- * §7.3 — ★ the runner. Fewest elements, highest stakes, strictest content rules.
+ * docs/FRONTEND.md §6 — ★ the runner. Fewest elements, highest stakes, strictest content rules.
  *
- * ⚠️ Read FRONTEND_PLAN §1 before touching this route or `runner.tsx`.
+ * ⚠️ Read docs/FRONTEND.md §6 before touching this route or `runner.tsx`.
  *
  * The App Router's real leak path here is invisible on screen: everything a
  * Server Component passes to a Client Component is serialized into the RSC

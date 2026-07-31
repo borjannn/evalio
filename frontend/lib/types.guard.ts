@@ -12,7 +12,7 @@
  * even when nothing renders it. A student screen that fetches the teacher shape
  * and merely declines to display `is_correct` has still shipped the answer key.
  *
- * See CLAUDE.md and PROJECT_ARCHITECTURE.md.
+ * See CLAUDE.md and docs/FRONTEND.md §6.
  */
 
 import type {

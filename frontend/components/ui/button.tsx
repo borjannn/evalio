@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/cn";
 
 /**
- * Class strings are Guidelines §5 verbatim. Don't compose one-off buttons in a
+ * Class strings are docs/FRONTEND.md §5 verbatim. Don't compose one-off buttons in a
  * page — a button that differs by a padding step is how the system erodes.
  *
  * No `"use client"`: this renders no state and no effects, so it works in both
@@ -35,13 +35,17 @@ export function Button({
       type={type}
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium",
-        // `transition-all`, not `transition-colors`: the press below moves the
-        // button, and a colour-only transition would snap it.
-        "transition-all duration-150",
-        // Tactile press. A button that visibly gives under the cursor reads as a
-        // physical control; 1px is enough and costs no layout, since translate
-        // and scale are both compositor-only.
-        "active:translate-y-px active:scale-[0.99]",
+        // `pressable` (globals.css) is the whole hover-and-press response —
+        // the lift, the give under the click, and the transition that carries
+        // both plus the variant's colour change. It used to live here as
+        // `transition-all` + two `active:` utilities; it moved out when every
+        // other control in the app needed the same thing, and one definition is
+        // the only way "clickable" keeps feeling the same everywhere.
+        "pressable",
+        // The "light up" half. Faint on purpose: paired with the lift it is
+        // plenty, and a heavier shadow on a button that sits in a toolbar of six
+        // makes the whole row look like it is hovering.
+        "hover:shadow-card",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "disabled:pointer-events-none disabled:opacity-50",
         variants[variant],

@@ -1,15 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ApiError, apiGet } from "@/lib/api";
+import { ApiError, apiGet, apiGetAll } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
-import type {
-  Enrollment,
-  GroupMembership,
-  Paginated,
-  SchoolClass,
-  TeachingGroup,
-} from "@/lib/types";
+import type { Enrollment, GroupMembership, SchoolClass, TeachingGroup } from "@/lib/types";
 
 import { Roster } from "./roster";
 
@@ -24,7 +18,21 @@ export async function generateMetadata({ params }: PageProps<"/teacher/classes/[
   }
 }
 
-/** FRONTEND_PLAN §5.10 — the roster, and which subject groups each student is in. */
+/**
+ * docs/FRONTEND.md §7 — the roster, and which subject groups each student is in.
+ *
+ * ⚠️ **Deliberately unpaginated**, and the one teacher screen that is. The
+ * subject-group editor below the roster shows a checkbox per enrolled student,
+ * so it needs the *whole* roster to be correct: paged at 25, a student on page 2
+ * would be missing from the grid, which reads as "not in the group" rather than
+ * as "not shown" — a wrong answer, not a partial one. Adding a `<Pager>` to the
+ * table alone would page the list and leave the editor's copy behind.
+ *
+ * The bound is class size, which is a real bound in a way that "topics this
+ * teacher owns" is not. If a class ever means a 300-student year group, this
+ * becomes the same shape change as `audience/` and `results/` — see
+ * `docs/ARCHITECTURE.md` §10 (Known constraints).
+ */
 export default async function ClassDetailPage({
   params,
 }: PageProps<"/teacher/classes/[classId]">) {
@@ -41,18 +49,20 @@ export default async function ClassDetailPage({
     throw error;
   }
 
+  // Both whole rather than first-page. Before this, a class of 30 showed 25
+  // students and called it the roster.
   const [enrollments, groups] = await Promise.all([
-    apiGet<Paginated<Enrollment>>(`/enrollments/?school_class=${classId}`),
-    apiGet<Paginated<TeachingGroup>>(`/groups/?school_class=${classId}`),
+    apiGetAll<Enrollment>(`/enrollments/?school_class=${classId}`),
+    apiGetAll<TeachingGroup>(`/groups/?school_class=${classId}`),
   ]);
 
   // Memberships are fetched per group. `/group-memberships/` filters by a single
   // `?group=`, and a class has a handful of groups, so this is a small fan-out
-  // rather than a reason to add an endpoint.
+  // rather than a reason to add an endpoint. Whole rather than first-page for the
+  // same reason as the groups: a missing membership reads as "not in the group",
+  // which is a wrong answer rather than a partial one.
   const memberships = await Promise.all(
-    groups.results.map((group) =>
-      apiGet<Paginated<GroupMembership>>(`/group-memberships/?group=${group.id}`),
-    ),
+    groups.map((group) => apiGetAll<GroupMembership>(`/group-memberships/?group=${group.id}`)),
   );
 
   return (
@@ -66,9 +76,9 @@ export default async function ClassDetailPage({
 
       <Roster
         schoolClass={schoolClass}
-        enrollments={enrollments.results}
-        groups={groups.results}
-        memberships={memberships.flatMap((page) => page.results)}
+        enrollments={enrollments}
+        groups={groups}
+        memberships={memberships.flat()}
       />
     </div>
   );

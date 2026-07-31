@@ -8,7 +8,7 @@ import { requireStudent } from "@/lib/auth";
 import type { AnswerSaved, QuizAttempt } from "@/lib/types";
 
 /**
- * The student runner's mutations — FRONTEND_PLAN §7.2–7.3.
+ * The student runner's mutations — docs/FRONTEND.md §7–7.3.
  *
  * Every one re-checks the role: a `"use server"` module compiles to a set of
  * public HTTP endpoints, so the check on the page that renders the button is not
@@ -18,7 +18,7 @@ import type { AnswerSaved, QuizAttempt } from "@/lib/types";
  *
  * 🔒 Nothing here returns correctness, and nothing here can. `answer/` responds
  * `{question_id, choice_id, saved: true}` by design, and `AnswerResponse
- * .is_correct` stays null until `submitted_at` is set (FRONTEND_PLAN §1). If a
+ * .is_correct` stays null until `submitted_at` is set (docs/FRONTEND.md §6). If a
  * future change makes a correctness value reachable from this file, that is the
  * bug — not the absence of one here.
  */
@@ -32,13 +32,21 @@ export async function startAttempt(formData: FormData): Promise<void> {
   let attempt: QuizAttempt;
   try {
     // 200 with the existing in-progress attempt, 201 with a new one — resuming
-    // is the default, so this is also the "Resume" button (§10, behaviour 2).
+    // is the default, so this is also the "Resume" button — docs/BACKEND.md §6.
     attempt = await apiPost<QuizAttempt>("/attempts/start/", { quiz_id: quizId });
   } catch (error) {
     // 403 is a real state, not an impossible one: the quiz was unassigned or
     // unpublished between the list being rendered and the button being pressed.
     if (error instanceof ApiError && error.status === 403) {
       redirect("/student?unavailable=1");
+    }
+    // 409 means they have already completed it — one attempt per quiz. Send them
+    // to the result they already have rather than to an error: from where they
+    // are standing, pressing Start and being shown their score is a coherent
+    // outcome, and there is nothing for them to fix.
+    if (error instanceof ApiError && error.status === 409) {
+      const done = (error.data as { attempt_id?: number } | null)?.attempt_id;
+      redirect(done ? `/student/attempts/${done}/result` : "/student");
     }
     throw error;
   }
@@ -55,7 +63,7 @@ export type SaveOutcome = { ok: boolean; error: string | null };
  * until the attempt is submitted.
  *
  * Returns an outcome instead of throwing because this is the one screen where a
- * dropped request loses a student's work (§7.3) — the runner has to be able to
+ * dropped request loses a student's work (docs/FRONTEND.md §6) — the runner has to be able to
  * say so and offer a retry, which it cannot do if the action explodes.
  */
 export async function saveAnswer(
@@ -87,7 +95,7 @@ export async function saveAnswer(
 /**
  * Lock the attempt and generate the feedback passage.
  *
- * Irreversible, which is why §7.3 puts a confirmation in front of it that states
+ * Irreversible, which is why docs/FRONTEND.md §6 puts a confirmation in front of it that states
  * the consequence in full — unanswered questions are marked incorrect.
  */
 export async function submitAttempt(attemptId: number): Promise<void> {

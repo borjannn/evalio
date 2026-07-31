@@ -15,6 +15,6 @@ export const MIN_SEARCH_LENGTH = 3;
 /**
  * `evalio/settings.py::REST_FRAMEWORK["PAGE_SIZE"]`. There is no "return
  * everything" parameter, so every list screen needs a way to reach row 26
- * (FRONTEND_PLAN §9). `<Pager>` uses this to turn a page number into "1–25 of N".
+ * (docs/FRONTEND.md §4). `<Pager>` uses this to turn a page number into "1–25 of N".
  */
 export const PAGE_SIZE = 25;

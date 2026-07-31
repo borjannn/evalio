@@ -98,7 +98,7 @@ class QuestionTeacherListSerializer(QuestionTeacherSerializer):
 
     Questions are shared by reference, so editing one changes every quiz using it.
     These two numbers are what let the question form warn about that concretely
-    instead of vaguely — see FRONTEND_PLAN §5.4.
+    instead of vaguely — see docs/FRONTEND.md §9.
 
     Kept separate from `QuestionTeacherSerializer` because that one is also used
     for writes and by `QuizDetailTeacherSerializer`, where the objects come from
@@ -143,13 +143,18 @@ class QuizTeacherListSerializer(QuizSerializer):
 
     question_count = serializers.IntegerField(read_only=True)
     assignment_count = serializers.IntegerField(read_only=True)
+    # Submitted attempts, counted the same way as `TopicSerializer.attempt_count`
+    # so the topic card and the rows underneath it add up.
+    attempt_count = serializers.IntegerField(read_only=True)
 
     class Meta(QuizSerializer.Meta):
-        fields = QuizSerializer.Meta.fields + ("question_count", "assignment_count")
+        fields = QuizSerializer.Meta.fields + (
+            "question_count", "assignment_count", "attempt_count",
+        )
 
 
 class QuizStudentListSerializer(serializers.ModelSerializer):
-    """List shape for the student's home screen (FRONTEND_PLAN §7.1).
+    """List shape for the student's home screen (docs/FRONTEND.md §7).
 
     Narrower than `QuizSerializer`, not wider: `is_published` and `created_by` are
     dropped. Every quiz reaching a student is published by definition — that is
@@ -161,14 +166,14 @@ class QuizStudentListSerializer(serializers.ModelSerializer):
     joins in `quizzes_assigned_to` multiply the question rows otherwise, and a
     5-question quiz reachable through both a class and a group reports 10.
 
-    The two attempt ids are what §7.1's Not started / In progress / Completed
+    The two attempt ids are what docs/FRONTEND.md §7's Not started / In progress / Completed
     comes from. They are annotations rather than something the client derives by
     also fetching `/attempts/`, because that list is paginated at 25 — a student
     with more attempts than that would see finished quizzes reported as untouched,
     and the bug would only appear for the busiest students.
 
     ⚠️ Attempt *ids* only. No score and no correctness: this shape is read before
-    a quiz is taken, so anything derived from the answer key is out (§1).
+    a quiz is taken, so anything derived from the answer key is out (docs/FRONTEND.md §6).
     """
 
     topic_name = serializers.CharField(source="topic.name", read_only=True)
@@ -250,7 +255,7 @@ class QuestionBankSerializer(serializers.ModelSerializer):
     question_count = serializers.IntegerField(read_only=True)
     # How many of those questions a quiz already references. Deleting the bank
     # cascades to its questions and therefore removes them from those quizzes, so
-    # the bank list warns with this number before confirming — FRONTEND_PLAN §5.6.
+    # the bank list warns with this number before confirming — docs/FRONTEND.md §7.
     questions_in_use_count = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -305,11 +310,17 @@ class TopicSerializer(serializers.ModelSerializer):
 
     quiz_count = serializers.IntegerField(read_only=True)
     question_bank_count = serializers.IntegerField(read_only=True)
+    # Submitted attempts at every quiz in this topic. In-progress attempts are
+    # excluded on purpose: the number is there so a teacher can tell from the
+    # dashboard which topics have statistics worth opening, so it counts exactly
+    # what /api/analytics/ counts. An unfinished attempt has no score and appears
+    # nowhere on that screen.
+    attempt_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Topic
         fields = (
             "id", "name", "description", "quiz_count", "question_bank_count",
-            "created_by", "created_at", "updated_at",
+            "attempt_count", "created_by", "created_at", "updated_at",
         )
         read_only_fields = ("created_by", "created_at", "updated_at")

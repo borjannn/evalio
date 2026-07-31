@@ -11,7 +11,7 @@ export const metadata = { title: "Sign in — Evalio" };
 
 /**
  * One login screen for both roles. There is no separate teacher login: the role
- * comes back from Django and decides the destination (FRONTEND_PLAN §6.1).
+ * comes back from Django and decides the destination (docs/FRONTEND.md §7).
  */
 export default async function LoginPage({
   searchParams,

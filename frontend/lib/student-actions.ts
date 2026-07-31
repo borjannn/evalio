@@ -15,8 +15,8 @@ export type StudentSearchResult = {
 };
 
 /**
- * Scoped student directory search, shared by the roster (§5.10) and the assign
- * screen's Individual tab (§5.8).
+ * Scoped student directory search, shared by the roster (docs/FRONTEND.md §7) and the assign
+ * screen's Individual tab (docs/FRONTEND.md §7).
  *
  * Two properties of the endpoint are security decisions, not ergonomics:
  *

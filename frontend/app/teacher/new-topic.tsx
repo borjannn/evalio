@@ -10,7 +10,7 @@ import { Field, Input, Textarea } from "@/components/ui/field";
 import { createTopic, type TopicFormState } from "./actions";
 
 /**
- * "New topic" button that reveals an inline form (FRONTEND_PLAN §5.1 — an inline
+ * "New topic" button that reveals an inline form (docs/FRONTEND.md §7 — an inline
  * form, not a modal).
  *
  * It owns the whole header row, taking the page heading as `children`, because
@@ -53,7 +53,13 @@ export function NewTopic({ children }: { children: React.ReactNode }) {
       </div>
 
       {open && (
-        <Card className="w-full max-w-xl">
+        /* Centred rather than flush left. The form is the only thing on screen
+            while it is open and it is half the page wide, so left-aligning it
+            hangs the whole screen off one edge — and the button that opened it
+            sits top-*right*, so the eye has to cross the page to find where it
+            went. `mx-auto` needs the `max-w-*` to bite, which is why both are
+            here and neither is a conflict for `cn` to resolve. */
+        <Card className="mx-auto w-full max-w-xl">
           <CardBody className="space-y-4 p-6">
             <h2 className="text-lg font-semibold tracking-tight">New topic</h2>
             <form action={formAction} className="space-y-4">

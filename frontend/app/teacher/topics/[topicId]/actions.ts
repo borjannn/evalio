@@ -43,7 +43,7 @@ export async function createQuiz(
     throw error;
   }
 
-  // §5.2: creating a quiz is the start of the main flow, so go straight to the
+  // docs/FRONTEND.md §7: creating a quiz is the start of the main flow, so go straight to the
   // builder rather than returning to a list the teacher is done with.
   revalidatePath(`/teacher/topics/${topicId}`);
   redirect(`/teacher/quizzes/${quiz.id}`);

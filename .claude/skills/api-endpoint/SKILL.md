@@ -14,7 +14,7 @@ from `quizzes/`, which is the most complete app.
 Before writing anything, answer: **can a student reach this endpoint?** If yes, no response field
 may leak `Choice.is_correct` or `Choice.feedback_text`, directly or through a nested serializer.
 Only wrong choices carry `feedback_text`, so exposing it reveals the answer by elimination. This is
-the app's core security property — see the invariants list in `PROJECT_ARCHITECTURE.md`.
+the app's core security property — see the invariants list in `docs/ARCHITECTURE.md` §7.
 
 ## 2. Model
 
@@ -109,11 +109,12 @@ and DRF then paginates an unordered queryset, silently repeating and skipping ro
 See `.claude/skills/frontend-route/SKILL.md`. Remember that list responses are paginated —
 `{count, next, previous, results}`, not a bare array.
 
-## 8. Update the architecture doc
+## 8. Update the documentation
 
-Add or correct the endpoint in the **API surface (implemented)** section of
-`PROJECT_ARCHITECTURE.md`, and update the model/relationship sections if you added a model. This doc
-is meant to match the code — leaving it stale is part of the change being incomplete.
+Add or correct the endpoint in the relevant app section of `docs/BACKEND.md`, and update its model
+list if you added a model. If a frontend screen now calls it, add the row to the API map in
+`docs/FRONTEND.md` §7. These docs are meant to match the code — leaving them stale is part of the
+change being incomplete.
 
 ## 9. Verify
 

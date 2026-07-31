@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 /**
- * Form primitives. Guidelines §5 for the class strings, §4 for the spacing
+ * Form primitives. docs/FRONTEND.md §5 for the class strings, docs/FRONTEND.md §5 for the spacing
  * (`space-y-1.5` label-to-control, `space-y-4` between fields).
  *
  * Nothing here uses a hook, deliberately. An earlier draft had `Field` generate
@@ -38,6 +38,36 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
       className={cn(
         "w-full rounded-md border border-border px-3 py-2 text-sm transition-colors",
         "focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * A native `<select>`, styled to sit level with `Input`.
+ *
+ * The class string is the one already repeated verbatim in the bank picker, the
+ * class list and the question form — this is where it should have lived. Those
+ * three still inline it; they render identically, so nothing drifts by leaving
+ * them until someone is in there anyway.
+ *
+ * `bg-white` is explicit and `Input` has no equivalent: a control with no
+ * background of its own picks up the browser's default select chrome, which is
+ * grey on every platform and makes the field look disabled next to a text input.
+ *
+ * Native rather than a listbox widget. A `<select>` gets keyboard behaviour,
+ * type-ahead and a platform-native picker on touch for free, and the filter row
+ * this exists for is not worth reimplementing all three badly.
+ */
+export function Select({ className, ...props }: ComponentProps<"select">) {
+  return (
+    <select
+      className={cn(
+        "w-full rounded-md border border-border bg-white px-3 py-2 text-sm transition-colors",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground",
         className,
       )}

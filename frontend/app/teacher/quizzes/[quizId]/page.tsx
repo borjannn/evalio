@@ -1,7 +1,8 @@
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ApiError, apiGet } from "@/lib/api";
+import { ApiError, apiGet, apiGetAll } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
 import type {
   Paginated,
@@ -25,7 +26,7 @@ export async function generateMetadata({ params }: PageProps<"/teacher/quizzes/[
 }
 
 /**
- * ★ The quiz builder — FRONTEND_PLAN §5.3. Everything students eventually
+ * ★ The quiz builder — docs/FRONTEND.md §8. Everything students eventually
  * receive is assembled here.
  *
  * ⚠️ Teacher-only. `QuizDetailTeacherSerializer` includes `is_correct` and
@@ -55,24 +56,35 @@ export default async function QuizBuilderPage({
   // one parallel request and lets the panel open already full — the alternative
   // was fetching it from the client on open, which meant either a loading flash
   // or reading a debounce ref during render.
+  //
+  // `banks` is fetched whole rather than first-page: it is the picker's bank
+  // filter and the question form's "which bank" select, so a bank past the 25th
+  // would be one a teacher cannot file a question in, with nothing on screen to
+  // say why. `pickable` stays a first page on purpose — it is search results,
+  // and the panel says "Showing 12 of 40 matches. Narrow the search."
   const [topic, banks, pickable] = await Promise.all([
     apiGet<Topic>(`/topics/${quiz.topic}/`),
-    apiGet<Paginated<QuestionBank>>(`/question-banks/?topic=${quiz.topic}`),
+    apiGetAll<QuestionBank>(`/question-banks/?topic=${quiz.topic}`),
     apiGet<Paginated<TeacherQuestionWithUsage>>(`/questions/?topic=${quiz.topic}`),
   ]);
 
   return (
     <div className="space-y-6">
+      {/* A pill rather than a bare "← Topic" line. On its own above a heading,
+          underlined text reads as a stray sentence; a bordered chip reads as the
+          control it is, and it is the only thing on the row so it needs to hold
+          its own edge. */}
       <Link
         href={`/teacher/topics/${quiz.topic}`}
-        className="inline-block text-sm text-muted-foreground hover:text-foreground hover:underline"
+        className="pressable inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground shadow-card hover:border-primary/30 hover:text-foreground hover:shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
-        ← {topic.name}
+        <ArrowLeft size={14} aria-hidden="true" />
+        {topic.name}
       </Link>
 
       <QuizBuilder
         quiz={quiz}
-        banks={banks.results}
+        banks={banks}
         pickable={pickable.results}
         pickableTotal={pickable.count}
       />

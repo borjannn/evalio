@@ -12,9 +12,11 @@ Backend apps: `accounts` (custom `User` with `role`), `quizzes` (Topic/QuestionB
 Quiz/QuizQuestion), `classes` (Class/Enrollment/TeachingGroup/GroupMembership/QuizAssignment),
 `attempts` (QuizAttempt/AnswerResponse), `feedback` (FeedbackResult). Frontend lives in `frontend/`.
 
-`@PROJECT_ARCHITECTURE.md` is the full data model and API reference, and it is kept accurate — when
-you change models, endpoints, or flows, update it in the same change. Its "Known gaps" section lists
-what isn't built yet; add to it rather than describing unbuilt work as if it exists.
+`@docs/BACKEND.md` is the full data model and API reference and `@docs/FRONTEND.md` is its
+counterpart for screens and components; both are kept accurate — when you change models, endpoints,
+flows or screens, update them in the same change. `docs/ARCHITECTURE.md` is the broad map and
+carries the "Known constraints" list; add to that rather than describing unbuilt work as if it
+exists. `docs/SETUP.md` covers getting the project running, and `README.md` indexes all four.
 
 ## Running locally
 
@@ -93,6 +95,13 @@ bug where editing a question destroyed submitted answers.
 **Nested writes must diff, not delete-and-recreate.** `QuestionTeacherSerializer.update()` matches
 choices by id for the same reason.
 
+**One attempt per student per quiz**, enforced in `StartAttemptView`. An *open* attempt is returned
+(200) so a refresh mid-quiz resumes; a *submitted* one closes the quiz and `start/` answers **409**
+with the existing `attempt_id`. 409 rather than 403 because the client has to tell "not allowed"
+apart from "already done" — `lib/attempt-actions.ts` redirects the second case to the student's
+result. Don't relax this into creating a second attempt without also building the retake UI and the
+history that goes with it; a silent second attempt overwrites the score the teacher has already seen.
+
 Permissions live in `quizzes/permissions.py` (`IsTeacher`, `IsStudent`, `IsOwner`, `IsTopicOwner`).
 ViewSets enforce access two ways and both are required:
 - `get_queryset()` filters to rows the user owns (returns `.none()` otherwise)
@@ -113,6 +122,16 @@ and the attempt-start authorization check. Don't reimplement it inline; those th
 Registration always creates a student. Teacher accounts are made via `createsuperuser` plus the
 admin. Don't restore a client-supplied `role`.
 
+**Student identity is reachable two ways, and both are deliberately narrow.**
+`classes/views.py::students_visible_to` scopes the directory search to students already enrolled with
+the searching teacher — that is what stops a teacher account enumerating the student table, and it
+must not be widened. Because it also cannot bootstrap (a new account matches nobody's search),
+`POST /api/enrollments/invite/` takes a **complete** username and enrols in one step. Keep all three
+properties: `iexact` and never `icontains`; no separate "does this username exist" lookup, because
+resolution inside the write means the only way to learn a username exists is to enrol its owner; and
+an unknown username and a *teacher's* username must return the **identical** 404, or it becomes an
+oracle for which accounts exist. `EnrollmentInviteTests` asserts each.
+
 **Pagination is on** (`PageNumberPagination`, `PAGE_SIZE = 25`), so list responses are
 `{count, next, previous, results}`. Note that `.annotate()` adds a `GROUP BY`, which makes
 `QuerySet.ordered` false even when `Meta.ordering` is set — add an explicit `.order_by()` to any
@@ -124,13 +143,15 @@ annotated queryset or pagination silently repeats and skips rows.
 ## Frontend conventions
 
 Next.js 16 App Router, TypeScript (`strict`), **Tailwind CSS v4**. See
-`.claude/skills/frontend-route/SKILL.md` and `@FRONTEND_PLAN.md`. `frontend/AGENTS.md` requires
+`.claude/skills/frontend-route/SKILL.md` and `@docs/FRONTEND.md`. `frontend/AGENTS.md` requires
 reading `node_modules/next/dist/docs/` before writing frontend code — this version differs from
 training data in ways that matter (`params` is a Promise, middleware is now `proxy.js`).
 
-**Styling is Tailwind utilities, not CSS Modules.** This replaced CSS Modules when the design spec
-landed — `frontend/Guidelines.md` is written entirely as class strings, and it is the source of
-truth for every colour, size and component pattern. Don't add `.module.css` files.
+**Styling is Tailwind utilities, not CSS Modules.** Don't add `.module.css` files. The source of
+truth for colour, size and component patterns is the code itself: tokens in the `@theme` block of
+`app/globals.css`, and the shared primitives in `components/ui/`. Take a class string from an
+existing primitive rather than composing your own — a one-off button that differs by a padding step
+is how the system erodes.
 
 Tailwind v4 has no `tailwind.config.js`. Tokens are declared in an `@theme` block in
 `app/globals.css`, which is what generates the utilities — `--color-muted-foreground` there is what
@@ -164,16 +185,70 @@ sit differently depending on which one someone remembered to add the class to.
 rings. The greys are slate rather than neutral so they share its cool cast. Green and red survive
 only as *semantic* status (Published/Draft, destructive), never as decoration.
 
+**`--color-accent-1..6` are the one exception, and they mean "which one", not "act on this".**
+Six hues that give a topic or a class a stable identity colour — `lib/accent.ts` picks one from the
+row id and returns `--accent` / `--accent-soft` for a card to set on itself, which is what makes
+`bg-[var(--accent-soft)]` work further down the tree. The colour may appear on the card's icon
+chip, its title hover, and a count that belongs to it. It may **not** appear on a control: the
+button, the link underline and the focus ring on an accented card all stay `--color-primary`,
+because that is what still has to mean "you can act on this". It is never a status either — the
+palette deliberately runs blue → magenta and contains no green, amber or red, so a topic can never
+accidentally look like a warning.
+
+Two things there are load-bearing. The ordering of the six is **interleaved on purpose** (blue,
+fuchsia, cyan, violet, pink, indigo): rows carry consecutive ids, so sorting them into a tidy hue
+ramp puts three shades of magenta next to each other on screen. And the accent reaches a `Badge`
+through `tone="accent"`, never through a className — `lib/cn.ts` is a plain string join with no
+Tailwind conflict resolution, so `bg-[var(--accent-soft)]` passed alongside the neutral tone's
+`bg-secondary` leaves both in the class list and lets CSS source order decide.
+
 ⚠️ **Colour may never distinguish a quiz choice in the student flow before submission**
-(FRONTEND_PLAN §1, Guidelines §6.1). The blue is for actions; correctness is never a colour until
+(docs/FRONTEND.md §6). The blue is for actions; correctness is never a colour until
 the feedback screen. Adding a `tone` to a component that a student sees mid-quiz breaks the core
 content rule.
 
 **Motion is CSS keyframes in `globals.css`, not a library.** Most of it is one-shot load-in
-(`logo-stroke`, `logo-letter`, `page-enter`), which `animation-delay` cascades already do — Motion
-or GSAP would add ~30kB to reach the same place. Every animation is mirrored in a
+(`logo-stroke`, `logo-letter`, `page-enter`, `item-enter`), which `animation-delay` cascades already
+do — Motion or GSAP would add ~30kB to reach the same place. Every animation is mirrored in a
 `@media (prefers-reduced-motion: reduce)` block that collapses it to its finished state; that block
 is mandatory, not a nicety.
+
+**`.pressable` is the one definition of "this is clickable."** A 1px lift on hover, a press that
+gives back under the click, and the transition that carries both. `<Button>` has it; so does every
+one-off control that isn't a `<Button>` — icon buttons, nav links, pager links, segmented tabs,
+breadcrumb pills. Two rules come with it:
+
+- **An element taking `pressable` drops its own `transition-colors`.** That utility sits in a later
+  cascade layer and would narrow `transition-property` back down to colours, leaving the lift to
+  snap. `pressable` supplies the colour transition too, so nothing is lost.
+- **It is applied by hand, never as a global `button` selector.** Three `<button>`s in the app must
+  not lift: the distribution chart draws one per bar purely as a hover target (`cursor-default`),
+  the student runner's choices are deliberately inert before submission (docs/FRONTEND.md §6), and the
+  question list's drag handle owns `cursor-grab`. A blanket selector breaks all three.
+
+**Charts build themselves in, and every bar is revealed with `clip-path`.** `bar-rise` (vertical)
+and `bar-fill` (horizontal) animate `inset()` from fully clipped to nothing, with `grid-sweep` and
+`mean-mark` sequencing the frame before and the reading after — the order lives in the `BUILD`
+constant in `distribution-chart.tsx`. Not `height`, which would put ten bars through layout every
+frame; not `scaleY`, which squashes a bar's top radius flat while it grows and then snaps it round
+at the end. ⚠️ These four collapse correctly under reduced motion *only* because `clip-path`,
+`transform` and `opacity` are set nowhere but inside the keyframes — adding a base `clip-path` to
+`.bar-rise` leaves the bar permanently clipped for anyone who asked for less motion.
+
+Re-slicing the statistics screen replays the chart via a `key` on `<DistributionChart>`. A CSS
+animation only runs when its element is created, and React would otherwise reconcile the same ten
+`<div>`s and silently swap their heights. Only the chart is keyed — keying the table under it would
+throw away the teacher's sort and filter on every grouping change.
+
+**`components/ui/tally.tsx` is the one piece of motion that is JavaScript**, and the reason is
+narrow: a number has to stay readable *while* it changes. The CSS route (`@property` plus
+`counter()`) is integer-only, renders through `::after` so the figure is neither selectable nor
+reliably announced, and needs two counters glued together to fake one decimal place. It is still
+one `rAF` loop, not a dependency. It seeds its state with the **target** so the server sends the
+real figure and a client without JS keeps it, then rewinds to zero in a *layout* effect — before
+paint — so the final number never flashes first. ⚠️ `null` renders an em dash and never animates;
+rolling a null up to zero would erase the "nobody has submitted" / "everyone scored nought"
+distinction the whole analytics layer exists to keep.
 
 **Only loading indicators loop** (`logo-trace`, `logo-breathe`, `skeleton`). A still progress
 indicator claims the work has stopped, and these are the only animations that remove themselves —
@@ -231,14 +306,34 @@ anything renders it. `StudentChoice` carrying `is_correct?: never` is what makes
 error; the payload grep is the check that it worked.
 
 The student shell (`components/student-header.tsx`) is a component the screens render, not a layout
-— the runner is an explicit exception to the nav (FRONTEND_PLAN §8) and a page cannot opt out of a
+— the runner is an explicit exception to the nav (docs/FRONTEND.md §6) and a page cannot opt out of a
 layout. The alternative was a `(shell)` route group putting `attempts/[attemptId]` in two places in
 the tree to express one difference.
 
-**Every list screen needs `<Pager>`** (`components/ui/pager.tsx`). The API is `PageNumberPagination`
-at 25 with no way to ask for everything, so a list without one silently caps at row 25 and nothing
-on screen admits it. The student screens have it; the teacher screens **do not yet** — see
-`@PROJECT_ARCHITECTURE.md` Known gaps.
+**A list being *read* needs `<Pager>`; a set being *computed against* must be fetched whole.** The
+API is `PageNumberPagination` at 25 with no way to ask for everything, and which of the two a fetch
+is decides the fix:
+
+- **A list the user reads** — topics, quizzes, classes, the bank list — gets `?page=` and a
+  `<Pager>` (`components/ui/pager.tsx`). Without one it silently caps at row 25 and nothing on screen
+  admits it.
+- **A set the screen computes against** — checkbox targets, `<option>`s, the rows a diff is taken
+  against — gets `apiGetAll` from `lib/api.ts`, which walks every page. A pager is no answer here,
+  because a subset produces a *wrong* answer rather than a short one: on the assign screen a class
+  on page 2 is unassignable, and an *assignment* on page 2 makes an already-assigned class render
+  unticked, so ticking it posts a duplicate. Same reason `/teacher/classes/[classId]` has no pager —
+  the group editor draws a checkbox per enrolled student, so a student on page 2 would read as *not
+  in the group*.
+
+`<Pager>` takes `param` and `preserve` for screens with more than one list: `?page=` cannot mean two
+things, so the topic screen uses `?quizzes=` and `?banks=` and each pager carries the other's page
+through. Read the page number with `pageFrom` (`lib/pagination.ts`) — `searchParams` values are
+`string | string[] | undefined`, and `Number(undefined)` is `NaN`, which Django answers with a 404.
+
+**Client-side filtering and pagination are incompatible.** A `.filter()` over the fetched array
+searches *the first 25 rows* and reports "no match" for row 26. When a list gains a pager its search
+moves to the server in the same change — see `banks/bank-list.tsx`, where the term lives in `?q=`
+(DRF's `?search=` on the wire) and a new term drops the page rather than preserving it.
 
 **Auth is a BFF.** The JWT lives in two httpOnly cookies and never reaches JavaScript; `lib/api.ts`
 is the only module that talks to Django and is `import "server-only"`. Every protected page calls
@@ -303,4 +398,4 @@ python manage.py test attempts     # one app
 - `accounts/tests.py` — registration cannot grant the teacher role.
 
 If a test asserts a 404 where you expect 403, or asserts a field is *absent*, it is testing a
-security invariant. Read `@PROJECT_ARCHITECTURE.md` before changing it.
+security invariant. Read `@docs/BACKEND.md` before changing it.

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Space_Mono } from "next/font/google";
 import "./globals.css";
 
-// Inter is a variable font, so it needs no `weight` — Guidelines §3 asks for
+// Inter is a variable font, so it needs no `weight` — docs/FRONTEND.md §5 asks for
 // 400/500/600 and the variable axis covers all three. Space Mono is not
 // variable, so its weights must be listed explicitly.
 const inter = Inter({

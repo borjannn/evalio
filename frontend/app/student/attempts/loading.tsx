@@ -3,7 +3,7 @@ import { PageLoader } from "@/components/ui/loader";
 /**
  * Covers the runner and its result screen.
  *
- * Full-height and chrome-less, matching the runner itself (§7.3 strips the nav):
+ * Full-height and chrome-less, matching the runner itself (docs/FRONTEND.md §6 strips the nav):
  * a skeleton header here would flash a navigation bar the next paint removes.
  *
  * The label matters more than usual. Starting a quiz writes a real attempt

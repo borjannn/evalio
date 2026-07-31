@@ -7,8 +7,8 @@ import { requireTeacher } from "@/lib/auth";
 import type { QuestionBank, QuestionType, TeacherQuestion } from "@/lib/types";
 
 /**
- * Question create/edit, shared by the bank contents screen (§5.7) and the quiz
- * builder's "Write a question" path (§5.3). Lives in `lib/` rather than beside
+ * Question create/edit, shared by the bank contents screen (docs/FRONTEND.md §7) and the quiz
+ * builder's "Write a question" path (docs/FRONTEND.md §8). Lives in `lib/` rather than beside
  * either route because both import it — a Server Function is just a module
  * export.
  *
@@ -41,7 +41,7 @@ export type QuestionPayload = {
    * Set when the form was opened from the quiz builder: the new question is
    * appended to that quiz in the same action.
    *
-   * §5.3 wants writing a question and adding it to be one gesture, and doing the
+   * docs/FRONTEND.md §8 wants writing a question and adding it to be one gesture, and doing the
    * add here rather than as a second client call means a teacher can't end up
    * with a question that was created but never reached the quiz. Ignored when
    * editing — the question is already wherever it belongs.

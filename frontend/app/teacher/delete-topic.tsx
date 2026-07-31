@@ -24,7 +24,7 @@ export function DeleteTopic({ id, name }: { id: number; name: string }) {
         type="button"
         onClick={() => setConfirming(true)}
         aria-label={`Delete ${name}`}
-        className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="pressable rounded-md p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <Trash2 size={16} />
       </button>
@@ -39,7 +39,7 @@ export function DeleteTopic({ id, name }: { id: number; name: string }) {
       <button
         type="button"
         onClick={() => setConfirming(false)}
-        className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="pressable rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         Cancel
       </button>
@@ -59,7 +59,7 @@ function ConfirmButton() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="pressable rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       {pending ? "Deleting…" : "Confirm"}
     </button>

@@ -59,6 +59,8 @@ INSTALLED_APPS = [
     'feedback',
     'attempts',
     'classes',
+    # Read-only: owns no models, only ways of asking about the others'.
+    'analytics',
 ]
 
 MIDDLEWARE = [

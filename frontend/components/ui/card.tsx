@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
  * A surface above the page ground.
  *
  * The 1px border still does the structural work; `--shadow-card` is what makes
- * it read as *above* rather than merely adjacent. Guidelines §1 used to forbid
+ * it read as *above* rather than merely adjacent. docs/FRONTEND.md §5 used to forbid
  * shadows outright and the screens looked flat once they had three levels of
  * nesting — the shadow is faint enough that you notice its absence, not its
  * presence. It is a token, so a change here is a change everywhere.
@@ -33,7 +33,7 @@ export function Card({
   );
 }
 
-/** §4: `p-5` or `p-6` for internal breathing room. */
+/** docs/FRONTEND.md §5: `p-5` or `p-6` for internal breathing room. */
 export function CardBody({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("p-5", className)} {...props} />;
 }

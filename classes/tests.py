@@ -225,6 +225,169 @@ class StudentSearchTests(APITestCase):
         self.assertEqual(self.client.get("/api/students/search/?q=alice").status_code, 403)
 
 
+class EnrollmentVisibilityTests(APITestCase):
+    """`POST /api/enrollments/` may not be used to enumerate the student table.
+
+    Owning the target class was once the only check, which left `student` as an
+    unguarded sequential integer — and since the response carries
+    `student_detail`, every guess returned a real name and username.
+    """
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="teacher", password="pw", role=User.Role.TEACHER
+        )
+        self.stranger = User.objects.create_user(
+            username="stranger", first_name="Not", last_name="Mine",
+            password="pw", role=User.Role.STUDENT,
+        )
+        self.mine = User.objects.create_user(
+            username="mine", password="pw", role=User.Role.STUDENT
+        )
+        self.class_a = Class.objects.create(
+            name="5A", school_year="2025/2026", created_by=self.teacher
+        )
+        self.class_b = Class.objects.create(
+            name="5B", school_year="2025/2026", created_by=self.teacher
+        )
+        Enrollment.objects.create(student=self.mine, school_class=self.class_a)
+        self.client.force_authenticate(self.teacher)
+
+    def enroll(self, student, school_class):
+        return self.client.post(
+            "/api/enrollments/",
+            {"student": student.id, "school_class": school_class.id},
+            format="json",
+        )
+
+    def test_cannot_enroll_a_student_from_outside_my_classes(self):
+        response = self.enroll(self.stranger, self.class_a)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Enrollment.objects.filter(student=self.stranger).exists())
+
+    def test_the_refusal_does_not_leak_the_students_name(self):
+        """The whole point: a probe must return nothing about the account."""
+        body = str(self.enroll(self.stranger, self.class_a).data)
+
+        self.assertNotIn("Not", body)
+        self.assertNotIn("Mine", body)
+        self.assertNotIn("stranger", body)
+
+    def test_can_still_add_a_visible_student_to_a_second_class(self):
+        """The roster's search-and-add path must be unaffected.
+
+        Search only offers students already enrolled with this teacher, so
+        everything it returns passes the new check by construction.
+        """
+        response = self.enroll(self.mine, self.class_b)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Enrollment.objects.filter(student=self.mine).count(), 2)
+
+    def test_invite_remains_the_route_to_someone_new(self):
+        """Closing the id path must not close the bootstrap with it."""
+        response = self.client.post(
+            "/api/enrollments/invite/",
+            {"school_class": self.class_a.id, "username": "stranger"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(Enrollment.objects.filter(student=self.stranger).exists())
+
+
+class EnrollmentInviteTests(APITestCase):
+    """`POST /api/enrollments/invite/` — the route onto a *first* roster.
+
+    The scoped search cannot provide one: a freshly registered student matches
+    nobody's search, so without this the only way to create a first enrolment is
+    Django admin. These tests pin the two properties that make widening the search
+    unnecessary — exact matching, and one indistinguishable failure.
+    """
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="teacher", password="pw", role=User.Role.TEACHER
+        )
+        self.other_teacher = User.objects.create_user(
+            username="other", password="pw", role=User.Role.TEACHER
+        )
+        self.newcomer = User.objects.create_user(
+            username="gpetrov", first_name="Georgi", last_name="Petrov",
+            password="pw", role=User.Role.STUDENT,
+        )
+        self.my_class = Class.objects.create(
+            name="5B", school_year="2025/2026", created_by=self.teacher
+        )
+        self.their_class = Class.objects.create(
+            name="5C", school_year="2025/2026", created_by=self.other_teacher
+        )
+        self.client.force_authenticate(self.teacher)
+
+    def invite(self, username, school_class=None):
+        return self.client.post(
+            "/api/enrollments/invite/",
+            {"school_class": (school_class or self.my_class).id, "username": username},
+            format="json",
+        )
+
+    def test_enrolls_a_student_nobody_could_have_searched_for(self):
+        """The bootstrap case: not enrolled anywhere, so invisible to every search."""
+        self.assertEqual(
+            self.client.get("/api/students/search/?q=gpetrov").data, []
+        )
+
+        response = self.invite("gpetrov")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["student_detail"]["username"], "gpetrov")
+        # And now they are searchable, because they are enrolled.
+        self.assertEqual(
+            [s["username"] for s in self.client.get("/api/students/search/?q=gpetrov").data],
+            ["gpetrov"],
+        )
+
+    def test_username_match_is_case_insensitive_but_still_exact(self):
+        self.assertEqual(self.invite("GPetrov").status_code, 201)
+
+    def test_a_partial_username_does_not_match(self):
+        """No `icontains` fallback — that would rebuild the enumeration hole."""
+        self.assertEqual(self.invite("gpet").status_code, 404)
+        self.assertFalse(Enrollment.objects.exists())
+
+    def test_unknown_username_and_teacher_username_are_indistinguishable(self):
+        """The response must not reveal that a username belongs to a teacher.
+
+        If these differed, the endpoint would be an oracle for "does this account
+        exist, and is it a teacher's?" — exactly what scoping the search prevents.
+        """
+        missing = self.invite("nobody-at-all")
+        teacher = self.invite("other")
+
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(teacher.status_code, 404)
+        self.assertEqual(missing.data["detail"], teacher.data["detail"])
+        self.assertFalse(Enrollment.objects.exists())
+
+    def test_inviting_twice_is_a_400_not_a_duplicate(self):
+        self.assertEqual(self.invite("gpetrov").status_code, 201)
+        second = self.invite("gpetrov")
+
+        self.assertEqual(second.status_code, 400)
+        self.assertEqual(Enrollment.objects.count(), 1)
+
+    def test_cannot_invite_into_another_teachers_class(self):
+        response = self.invite("gpetrov", school_class=self.their_class)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Enrollment.objects.exists())
+
+    def test_students_cannot_invite(self):
+        self.client.force_authenticate(self.newcomer)
+        self.assertEqual(self.invite("gpetrov").status_code, 403)
+
+
 class AssignmentAudienceTests(APITestCase):
     """`GET /api/quizzes/{id}/audience/` — what the assign screen counts and labels.
 

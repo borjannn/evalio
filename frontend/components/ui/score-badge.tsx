@@ -1,7 +1,7 @@
 import { cn } from "@/lib/cn";
 
 /**
- * The score band. FRONTEND_PLAN §9 asks for **one banding scale** across the
+ * The score band. docs/FRONTEND.md §5 asks for **one banding scale** across the
  * result screen, history, and the teacher's results table — three screens where
  * the same student's same score must not look like three different outcomes.
  * That is the whole reason this is a component and not a class string.
@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
  * ⚠️ It is green/amber/red, which is only permissible **after** submission. A
  * score does not exist before then, so this component cannot appear in the
  * runner — and nothing in the student flow may colour a *choice* at any point
- * (FRONTEND_PLAN §1, Guidelines §6.1).
+ * (docs/FRONTEND.md §6).
  */
 const bands = [
   { min: 80, className: "bg-green-50 text-green-700", fill: "bg-green-500" },
@@ -23,7 +23,7 @@ function bandFor(percent: number) {
 
 /**
  * The same thresholds as a solid fill, for the per-question accuracy bars on the
- * teacher's results screen (§5.11). Exported from here rather than redefined
+ * teacher's results screen (docs/FRONTEND.md §7). Exported from here rather than redefined
  * there so the two cannot drift — a question at 79% and a student at 79% have to
  * read as the same kind of bad.
  */

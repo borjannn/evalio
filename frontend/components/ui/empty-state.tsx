@@ -13,7 +13,7 @@ type EmptyStateProps = {
 };
 
 /**
- * FRONTEND_PLAN §9 requires every list screen to own this state explicitly, and
+ * docs/FRONTEND.md §5 requires every list screen to own this state explicitly, and
  * it is the state you see most while building against a fresh database — run
  * `python manage.py seed_demo --flush` to get back to it deliberately.
  *

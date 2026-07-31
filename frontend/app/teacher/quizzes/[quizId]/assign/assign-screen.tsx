@@ -25,7 +25,7 @@ import type {
 import { assignTo, unassign } from "./actions";
 
 /**
- * FRONTEND_PLAN §5.8.
+ * docs/FRONTEND.md §7.
  *
  * Three targeting levels, and the thing a teacher actually wants to confirm is
  * the **total** — so the running summary is the loudest element on the screen,
@@ -156,7 +156,7 @@ export function AssignScreen({
 }
 
 /**
- * The running total — §5.8's "the thing the teacher actually wants to confirm".
+ * The running total — docs/FRONTEND.md §7's "the thing the teacher actually wants to confirm".
  *
  * Deduplicated server-side, so a class plus one of its members reads as one
  * number rather than implying double coverage.
@@ -252,7 +252,7 @@ function TargetList({
 /**
  * Individual assignment.
  *
- * The important behaviour is the one §5.8 calls out: naming someone already
+ * The important behaviour is the one docs/FRONTEND.md §7 calls out: naming someone already
  * covered by an assigned class must not double-assign, and must say *why* they
  * are covered. `audience.students[].via` carries the routes, so the row reads
  * "Already covered via 5B" instead of silently doing nothing.
@@ -418,7 +418,7 @@ function CurrentAssignments({
                   });
                 }}
                 aria-label={`Unassign ${assignment.target_label}`}
-                className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="pressable rounded-md p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <X size={16} />
               </button>
@@ -448,7 +448,7 @@ function TargetTab({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors",
+        "pressable inline-flex items-center gap-2 rounded-sm px-3 py-1.5 text-sm font-medium",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         active ? "bg-white text-foreground" : "text-muted-foreground hover:text-foreground",
       )}

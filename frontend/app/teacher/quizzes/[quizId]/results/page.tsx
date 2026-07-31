@@ -8,6 +8,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ScoreBadge, scoreFill } from "@/components/ui/score-badge";
 import { PageHeader, Section } from "@/components/ui/section";
+import { Stat } from "@/components/ui/stat";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { ApiError, apiGet } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
@@ -15,7 +16,7 @@ import { cn } from "@/lib/cn";
 import type { Quiz, QuizResults } from "@/lib/types";
 
 /**
- * §5.11 — how one quiz went.
+ * docs/FRONTEND.md §7 — how one quiz went.
  *
  * ⚠️ Teacher-only. Carries per-question correctness for every student.
  *
@@ -68,7 +69,7 @@ export default async function QuizResultsPage({
         eyebrow={
           <Link
             href={`/teacher/quizzes/${quiz.id}`}
-            className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="pressable inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             <ArrowLeft size={14} />
             {quiz.title}
@@ -134,7 +135,7 @@ export default async function QuizResultsPage({
             action={
               <Link
                 href={`/teacher/quizzes/${quiz.id}/assign`}
-                className="inline-flex items-center rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                className="pressable inline-flex items-center rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Assign this quiz
               </Link>
@@ -148,7 +149,7 @@ export default async function QuizResultsPage({
             action={
               <Link
                 href={`/teacher/quizzes/${quiz.id}/results`}
-                className="inline-flex items-center rounded-md bg-secondary px-4 py-2.5 text-sm font-medium transition-colors hover:bg-secondary/80"
+                className="pressable inline-flex items-center rounded-md bg-secondary px-4 py-2.5 text-sm font-medium hover:bg-secondary/80"
               >
                 Clear the filter
               </Link>
@@ -233,28 +234,6 @@ export default async function QuizResultsPage({
         )}
       </Section>
     </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string | number;
-  hint?: string;
-}) {
-  return (
-    <Card>
-      <CardBody className="p-5">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {label}
-        </p>
-        <p className="mt-1.5 text-3xl font-semibold tabular-nums">{value}</p>
-        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
-      </CardBody>
-    </Card>
   );
 }
 
@@ -346,7 +325,7 @@ function FilterChip({
       href={href}
       aria-current={active ? "true" : undefined}
       className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+        "pressable rounded-md px-3 py-1.5 text-sm font-medium",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-secondary",
       )}

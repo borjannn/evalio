@@ -1,6 +1,6 @@
 ---
 name: frontend-route
-description: Add a screen to the Evalio Next.js frontend — an App Router route under frontend/app/, styled with Tailwind v4 per frontend/Guidelines.md, fetching through the BFF route handlers. Use when adding any page, layout, or API proxy route to the frontend.
+description: Add a screen to the Evalio Next.js frontend — an App Router route under frontend/app/, styled with Tailwind v4, fetching through the BFF route handlers. Use when adding any page, layout, or API proxy route to the frontend.
 ---
 
 # Add an Evalio frontend route
@@ -12,14 +12,15 @@ no real screen to copy yet, so this skill defines the conventions rather than de
 ones. If you are the first to build a given piece (the API client, the auth session helper, the app
 shell), you are setting the pattern — keep it small and match what's here.
 
-`frontend/Guidelines.md` is the **style source of truth**: colours, type scale, spacing, and a class
-string for every component pattern. `FRONTEND_BUILD_PLAN.md` records the decisions that resolve its
-internal conflicts — read §0 of that before inventing a value.
+The **style source of truth is the code**: design tokens in the `@theme` block of
+`frontend/app/globals.css`, and the shared primitives in `frontend/components/ui/`. Read a
+neighbouring screen before inventing a value — the patterns are consistent because they are shared,
+not because a document describes them.
 
-`FRONTEND_PLAN.md` at the repo root is the screen-by-screen specification: which routes exist, what
-data each shows, and which control type each field uses. Read the relevant section before building.
-§12 lists what the backend genuinely does not provide; everything else in the plan is buildable
-today.
+`docs/FRONTEND.md` is the reference for the screens that exist: §7 maps every route to the endpoints
+it calls, §8 covers the notable screens, and §4 is the data-fetching rule. Read the relevant section
+before building. `docs/ARCHITECTURE.md` §10 lists the constraints the backend does not currently
+lift.
 
 ## 0. Read the Next.js docs first — this is not optional
 
@@ -47,7 +48,7 @@ Docs worth opening by task: `01-getting-started/03-layouts-and-pages.md`,
 
 **A student must never receive `Choice.is_correct` or `Choice.feedback_text` before submitting.**
 The backend enforces this by sending students a reduced shape — the fields are simply absent from
-`QuestionStudentSerializer`. See `CLAUDE.md` and `PROJECT_ARCHITECTURE.md`.
+`QuestionStudentSerializer`. See `CLAUDE.md` and `docs/FRONTEND.md` §6.
 
 The App Router adds a leak path the old Vite SPA did not have. **Anything a Server Component passes
 as a prop to a Client Component is serialized into the RSC payload and shipped to the browser** — it
@@ -96,13 +97,13 @@ frontend/
   lib/                                               server-only helpers: api client, session, types
 ```
 
-- **Tailwind utilities in `className`. No `.module.css` files.** Take class strings from
-  `Guidelines.md` §5 rather than composing your own; a one-off button that differs by a padding step
+- **Tailwind utilities in `className`. No `.module.css` files.** Use the primitives in
+  `components/ui/` rather than composing your own; a one-off button that differs by a padding step
   is the way the system erodes.
 - Repeated markup becomes a component in `components/ui/`, not a copied class string.
 - Tokens live in `app/globals.css` under `@theme`. Tailwind v4 has **no `tailwind.config.js`** —
   adding one does nothing. A colour that isn't a token doesn't belong in a component.
-- Focus states use `focus-visible:ring-2 focus-visible:ring-ring` everywhere (Guidelines §6.2).
+- Focus states use `focus-visible:ring-2 focus-visible:ring-ring` everywhere.
 - Import across folders with the `@/` alias — `tsconfig.json` maps it to the frontend root.
 - **`.tsx` for anything with JSX, `.ts` otherwise.** `strict` is on, so an untyped parameter is a
   build error, not a warning. Don't reach for `any` to silence it — if a shape is genuinely unknown
@@ -110,7 +111,7 @@ frontend/
 - Route groups `(teacher)` / `(student)` organise folders without adding a URL segment — use them to
   hang a role-specific layout without turning it into `/teacher/teacher/...`.
 
-Routes are fixed by `FRONTEND_PLAN.md` §4. Don't invent new URL shapes; if a screen needs one that
+Routes are fixed by docs/FRONTEND.md §7. Don't invent new URL shapes; if a screen needs one that
 isn't in the plan, add it to the plan in the same change.
 
 ## 3. Server Component by default
@@ -149,7 +150,7 @@ marked `"use client"` cannot be `async` and cannot read cookies — if you find 
 you've put the directive too high.
 
 For loading and error states, use the `loading.tsx` and `error.tsx` file conventions rather than
-hand-rolling `isLoading` flags. `error.tsx` must be a Client Component. `FRONTEND_PLAN.md` §9 lists
+hand-rolling `isLoading` flags. `error.tsx` must be a Client Component. docs/FRONTEND.md §5 lists
 the states every screen owes.
 
 ## 4. Talking to Django

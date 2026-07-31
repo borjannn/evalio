@@ -12,7 +12,7 @@ import { requireStudent } from "@/lib/auth";
 import type { QuizDetailStudent } from "@/lib/types";
 
 /**
- * §7.2 — the intro. Title, description, question count, one primary button.
+ * docs/FRONTEND.md §7 — the intro. Title, description, question count, one primary button.
  *
  * A deliberate interstitial rather than a redirect: pressing Start writes a real
  * `QuizAttempt`, and a record that exists because someone followed a link is a
@@ -21,7 +21,7 @@ import type { QuizDetailStudent } from "@/lib/types";
  * ⚠️ `QuizDetailStudent` carries `quiz_questions` with the full text of every
  * question. Nothing here renders them — but they are in the RSC payload for this
  * route regardless, which is fine: question text is not the answer key.
- * `StudentChoice` has no `is_correct` and no `feedback_text` at all (§1).
+ * `StudentChoice` has no `is_correct` and no `feedback_text` at all (docs/FRONTEND.md §6).
  */
 export default async function QuizIntro({
   params,
@@ -47,7 +47,7 @@ export default async function QuizIntro({
       <div className="space-y-6">
         <Link
           href="/student"
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="pressable inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft size={14} />
           Your quizzes
@@ -73,9 +73,15 @@ export default async function QuizIntro({
             </p>
 
             {/* A form posting to a Server Function: no client component, and it
-                works with JavaScript off. `start/` returns an existing attempt
-                rather than creating a second one, so this is safe to press twice
-                and is really "Resume" for anyone who left mid-quiz (§10.2). */}
+                works with JavaScript off. `start/` returns an existing *open*
+                attempt rather than creating a second one, so this is safe to
+                press twice and is really "Resume" for anyone who left mid-quiz
+                (docs/BACKEND.md §6). Once an attempt is submitted the quiz is closed: `start/`
+                answers 409 and `startAttempt` sends them to the result they
+                already have. This screen cannot say so up front — the student
+                quiz *detail* shape carries no attempt state, only the list shape
+                does — but the outcome is coherent either way, and the only route
+                here for a finished quiz is typing the URL. */}
             <form action={startAttempt}>
               <input type="hidden" name="quiz" value={quiz.id} />
               <Button type="submit" disabled={count === 0}>

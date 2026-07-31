@@ -13,9 +13,9 @@ import { requireStudent } from "@/lib/auth";
 import type { Paginated, StudentQuizListItem } from "@/lib/types";
 
 /**
- * §7.1 — the quizzes assigned to this student.
+ * docs/FRONTEND.md §7 — the quizzes assigned to this student.
  *
- * ⚠️ Everything below this route is bound by FRONTEND_PLAN §1: no correctness
+ * ⚠️ Everything below this route is bound by docs/FRONTEND.md §6: no correctness
  * and no explanation text may reach a student before they submit. The backend
  * enforces it by shape (`StudentQuizListItem` and `StudentChoice` simply have no
  * answer key), which is what makes it a build error rather than a review item.
@@ -24,7 +24,7 @@ import type { Paginated, StudentQuizListItem } from "@/lib/types";
 export const metadata = { title: "Your quizzes — Evalio" };
 
 /**
- * "Not started" / "In progress" / "Completed" — §7.1 calls this the screen's core
+ * "Not started" / "In progress" / "Completed" — docs/FRONTEND.md §7 calls this the screen's core
  * logic. Both ids come off the list endpoint; see `StudentQuizListItem`.
  */
 function statusFor(quiz: StudentQuizListItem): {
@@ -51,7 +51,7 @@ function statusFor(quiz: StudentQuizListItem): {
     };
   }
 
-  // Straight to the intro (§7.2), never to a start action. Starting writes a
+  // Straight to the intro (docs/FRONTEND.md §7), never to a start action. Starting writes a
   // real attempt record, so it has to be a decision rather than a side effect of
   // following a link.
   return {
@@ -81,7 +81,7 @@ export default async function StudentQuizzes({
 
         {/* Set by `startAttempt` when Django refuses: the quiz was unassigned or
             unpublished between this list rendering and the button being pressed.
-            A real state, not an impossible one (§10, behaviour 3). */}
+            A real state, not an impossible one — see docs/BACKEND.md §6. */}
         {unavailable && (
           <p
             role="status"
@@ -132,7 +132,7 @@ export default async function StudentQuizzes({
 
                         <Link
                           href={status.href}
-                          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:translate-y-px active:scale-[0.99]"
+                          className="pressable inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:translate-y-px active:scale-[0.99]"
                         >
                           {status.action}
                         </Link>

@@ -12,7 +12,7 @@ import { requireStudent } from "@/lib/auth";
 import type { FeedbackResult, Paginated } from "@/lib/types";
 
 /**
- * §7.5 — every quiz this student has finished, newest first.
+ * docs/FRONTEND.md §7 — every quiz this student has finished, newest first.
  *
  * Reads `/feedback/mine/` rather than `/attempts/`: history is a list of
  * *results*, and a `FeedbackResult` only exists once an attempt is submitted. An

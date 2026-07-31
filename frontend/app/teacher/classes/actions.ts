@@ -4,10 +4,16 @@ import { revalidatePath } from "next/cache";
 
 import { ApiError, apiDelete, apiPatch, apiPost } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
-import type { Enrollment, GroupMembership, SchoolClass, TeachingGroup } from "@/lib/types";
+import type {
+  Enrollment,
+  GroupMembership,
+  SchoolClass,
+  StudentSummary,
+  TeachingGroup,
+} from "@/lib/types";
 
 /**
- * Class, roster and group mutations — FRONTEND_PLAN §5.9 and §5.10.
+ * Class, roster and group mutations — docs/FRONTEND.md §7.
  *
  * Every one re-checks the role: `"use server"` publishes real HTTP endpoints.
  * Ownership stays Django's job — none of these models carry `created_by`, so
@@ -159,6 +165,48 @@ export async function enrollStudent(
   revalidatePath(`/teacher/classes/${schoolClassId}`);
   revalidatePath("/teacher/classes");
   return { error: null };
+}
+
+/**
+ * Enrol by **exact** username — the route onto a *first* roster.
+ *
+ * `enrollStudent` above can only add someone the search already found, and the
+ * search is scoped to students enrolled with this teacher. A student who has just
+ * registered is therefore invisible to it, and this is how they get in.
+ *
+ * The 404 is a real answer rather than a missing page, so it is returned as a
+ * message instead of thrown: Django deliberately gives the same one whether the
+ * username belongs to nobody or to a teacher, and passing it through unchanged is
+ * what keeps this from becoming a way to probe for accounts.
+ */
+export async function inviteStudentByUsername(
+  schoolClassId: number,
+  username: string,
+): Promise<{ error: string | null; student: StudentSummary | null }> {
+  await requireTeacher();
+
+  const trimmed = username.trim();
+  if (!trimmed) return { error: "Enter a username.", student: null };
+
+  let enrollment: Enrollment;
+  try {
+    enrollment = await apiPost<Enrollment>("/enrollments/invite/", {
+      school_class: schoolClassId,
+      username: trimmed,
+    });
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 400 || error.status === 403 || error.status === 404)
+    ) {
+      return { error: error.formMessage, student: null };
+    }
+    throw error;
+  }
+
+  revalidatePath(`/teacher/classes/${schoolClassId}`);
+  revalidatePath("/teacher/classes");
+  return { error: null, student: enrollment.student_detail };
 }
 
 /**

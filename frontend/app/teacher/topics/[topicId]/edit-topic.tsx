@@ -9,7 +9,7 @@ import type { Topic } from "@/lib/types";
 
 import { updateTopic, type EditTopicState } from "./actions";
 
-/** §5.2: name and description edit inline, not on a separate screen. */
+/** docs/FRONTEND.md §7: name and description edit inline, not on a separate screen. */
 export function EditTopic({ topic }: { topic: Topic }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<EditTopicState, FormData>(

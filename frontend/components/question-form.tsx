@@ -15,7 +15,7 @@ import {
 import type { QuestionBank, QuestionType, TeacherQuestionWithUsage } from "@/lib/types";
 
 /**
- * The question form — FRONTEND_PLAN §5.4. Same form for creating and editing.
+ * The question form — docs/FRONTEND.md §9. Same form for creating and editing.
  *
  * This is where all feedback content originates, so the rules below are content
  * rules, not styling:
@@ -302,7 +302,7 @@ export function QuestionForm({
                         type="button"
                         onClick={() => removeRow(index)}
                         aria-label={`Remove choice ${index + 1}`}
-                        className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        className="pressable rounded-md p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                       >
                         <X size={16} />
                       </button>

@@ -7,8 +7,8 @@ import { requireTeacher } from "@/lib/auth";
 import type { QuestionBank } from "@/lib/types";
 
 /**
- * Bank mutations, shared by the bank list (§5.6) and the bank contents screen
- * (§5.7) — a Server Function is just a module export, so both routes import
+ * Bank mutations, shared by the bank list (docs/FRONTEND.md §7) and the bank contents screen
+ * (docs/FRONTEND.md §7) — a Server Function is just a module export, so both routes import
  * these rather than each declaring its own.
  *
  * Every one re-checks the role: `"use server"` publishes real HTTP endpoints,

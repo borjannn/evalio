@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from quizzes.permissions import IsTeacher
@@ -8,6 +9,7 @@ from quizzes.permissions import IsTeacher
 from .models import Class, Enrollment, GroupMembership, QuizAssignment, TeachingGroup
 from .serializers import (
     ClassSerializer,
+    EnrollmentInviteSerializer,
     EnrollmentSerializer,
     GroupMembershipSerializer,
     QuizAssignmentSerializer,
@@ -90,7 +92,86 @@ class EnrollmentViewSet(TeacherOwnedViewSet):
         school_class = serializer.validated_data["school_class"]
         if school_class.created_by_id != self.request.user.id:
             self.permission_denied(self.request, message="You do not own this class.")
+
+        # Owning the class is not enough. Without this, `student` is an unguarded
+        # integer: ids are sequential, so a teacher could walk them, and because
+        # `EnrollmentSerializer` returns `student_detail` each attempt hands back
+        # a name and username — an enumeration of the whole student table dressed
+        # up as a roster edit.
+        #
+        # Scoped to students already enrolled with this teacher, which is exactly
+        # what the roster's search offers, so the search-and-add path is
+        # unaffected. Reaching someone new is `invite/`'s job, and it requires a
+        # complete username rather than a guessable id.
+        student = serializer.validated_data["student"]
+        if not students_visible_to(self.request.user).filter(pk=student.pk).exists():
+            self.permission_denied(
+                self.request,
+                message=(
+                    "That student is not in any of your classes. "
+                    "Add them by their exact username instead."
+                ),
+            )
         serializer.save()
+
+    @action(detail=False, methods=["post"], url_path="invite")
+    def invite(self, request):
+        """POST /api/enrollments/invite/  { "school_class": N, "username": "gpetrov" }
+
+        Enrol by **exact** username. This is the only route from a self-registered
+        account onto a first roster — `students_visible_to` scopes the directory
+        search to students already enrolled with the searching teacher, so a new
+        account matches nobody's search and would otherwise need Django admin.
+
+        `@action` is DRF's extra-route decorator: `detail=False` makes it a
+        collection route, so the router that registered this ViewSet publishes it
+        at `/api/enrollments/invite/` without a separate URLconf entry.
+
+        **Not found and not-a-student answer identically**, and that is the point
+        rather than an accident. Distinguishing them would turn this into an
+        oracle for "does this account exist, and is it a teacher's?" — precisely
+        what the scoped search is there to prevent. The teacher learns nothing
+        they did not already supply.
+        """
+        payload = EnrollmentInviteSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        school_class = payload.validated_data["school_class"]
+        username = payload.validated_data["username"]
+
+        # Matches the sibling `perform_create` above: an explicit ownership check
+        # rather than a queryset filter, so this is a 403 where the ViewSet's
+        # detail routes would 404. The class id comes from the teacher's own
+        # screen, so neither is reachable in normal use.
+        if school_class.created_by_id != request.user.id:
+            self.permission_denied(request, message="You do not own this class.")
+
+        # `iexact` rather than `=`: usernames are case-sensitive in Django, and a
+        # teacher copying one off a register should not be defeated by a capital.
+        # It widens nothing — an exact string is still required.
+        student = User.objects.filter(
+            username__iexact=username, role=User.Role.STUDENT
+        ).first()
+        if student is None:
+            return Response(
+                {"detail": "No student with that username."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        enrollment, created = Enrollment.objects.get_or_create(
+            student=student, school_class=school_class
+        )
+        if not created:
+            return Response(
+                {"detail": f"{student.username} is already in this class."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Re-fetch through the ViewSet's queryset so the response carries
+        # `group_names`, which the roster renders and which needs the prefetch.
+        enrollment = self.get_queryset().get(pk=enrollment.pk)
+        return Response(
+            EnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED
+        )
 
 
 class TeachingGroupViewSet(TeacherOwnedViewSet):

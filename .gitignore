@@ -7,20 +7,11 @@ CLAUDE.local.md
 # Machine-local agent permission cache
 .claude/settings.local.json
 
-# Working plans — drafts handed between agents, not project documentation.
-# PROJECT_ARCHITECTURE.md is the checked-in reference.
-FRONTEND_PLAN.md
-BACKEND_PLAN.md
-FRONTEND_BUILD_PLAN.md
-
-# Figma Make reference export — design reference, not project code.
-# Contains committed .next/ build output and webpack cache blobs.
-figma_frontend_example/
-
-# Style spec, kept local alongside the reference export it describes.
-# NOTE: CLAUDE.md and the frontend-route skill both cite this as the style
-# source of truth, so a fresh clone won't have the file they point at.
-frontend/Guidelines.md
+# The working plans (FRONTEND_PLAN, BACKEND_PLAN, FRONTEND_BUILD_PLAN,
+# PROJECT_ARCHITECTURE, prototype1) and the Figma Make export were deleted once
+# `docs/` replaced them. Their ignore rules went with them: three of those files
+# were gitignored, which meant CLAUDE.md and the skills cited a style spec a
+# fresh clone never had. Everything in `docs/` is checked in, deliberately.
 
 
 .venv/

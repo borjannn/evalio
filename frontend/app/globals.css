@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Design tokens — the source of truth is frontend/Guidelines.md §2.
+/* Design tokens — the source of truth is docs/FRONTEND.md §5.
    Tailwind v4 reads these from @theme and generates the matching utilities,
    so `--color-muted-foreground` here is what makes `text-muted-foreground` work.
    Change a value here, not in a component. */
@@ -33,7 +33,7 @@
   --color-canvas: #f6f8fb;
 
   /* Elevation.
-     Guidelines §1 used to say "zero drop-shadows" and mean it — cards separated
+     docs/FRONTEND.md §5 used to say "zero drop-shadows" and mean it — cards separated
      by a 1px line alone. That reads flat rather than clean once a screen has
      three levels of nesting, so there is now exactly one card shadow, and it is
      structural: it is what says "this is a surface above the ground". It is
@@ -57,7 +57,7 @@
      and white text on it).
 
      ⚠️ It must never distinguish a quiz choice in the student flow before
-     submission (FRONTEND_PLAN §1, Guidelines §6.1). Colour is for *actions*
+     submission (docs/FRONTEND.md §6). Colour is for *actions*
      here, never for correctness. */
   --color-primary: #2563eb;
   --color-primary-foreground: #ffffff;
@@ -67,6 +67,40 @@
   /* Borders & structure */
   --color-border: #dbe2ea;
   --color-ring: #2563eb;
+
+  /* Identity accents — a topic's colour, a class's colour. NOT a seventh way to
+     say "action", and never a status.
+
+     This is the one deliberate loosening of the one-brand-colour rule above, and
+     it is narrow: an accent identifies *which thing you are looking at*, so it
+     may only ever appear on a card's icon chip, its hover border, and the count
+     that belongs to it. Every control on that card — the link, the button, the
+     focus ring — stays `--color-primary`, because that is what still has to mean
+     "you can act on this".
+
+     The hues are picked to be unmistakably *not* the semantic trio. Green, amber
+     and red are the score bands and the destructive action; a topic tinted amber
+     would read as a warning about the topic. So the ramp runs blue → magenta,
+     plus cyan, and stops there. All at the 600 step, which is what makes six
+     different hues read as one family rather than as a highlighter set.
+
+     `lib/accent.ts` picks one from an id. Sequential ids cycle through all six;
+     the same topic keeps its colour forever, which is the property that makes
+     this worth having at all.
+
+     ⚠️ **The order is interleaved, not the order of the colour wheel**, and that
+     is the whole reason the list is written out rather than sorted by hue. Rows
+     get consecutive ids, so neighbours on screen are neighbours in this list —
+     run it blue → indigo → violet → fuchsia → pink and three cards in a row come
+     out three shades of magenta. Stepping across the wheel instead puts the
+     furthest-apart hues next to each other, which is where the difference has to
+     be visible. Reordering these into a tidy ramp is a regression. */
+  --color-accent-1: #2563eb; /* blue-600 — the brand colour keeps its turn */
+  --color-accent-2: #c026d3; /* fuchsia-600 */
+  --color-accent-3: #0891b2; /* cyan-600 */
+  --color-accent-4: #7c3aed; /* violet-600 */
+  --color-accent-5: #db2777; /* pink-600 */
+  --color-accent-6: #4f46e5; /* indigo-600 */
 }
 
 @layer base {
@@ -199,6 +233,69 @@
   }
 }
 
+/* --- Data display -----------------------------------------------------------
+
+   A chart that appears fully drawn asks you to take its shape on trust. One that
+   builds itself in front of you shows you the shape being *made*, and the eye
+   follows the growth to the tall bar without being pointed at it. That is the
+   whole argument for the four keyframes below; they are one-shot like everything
+   else here, and a chart that has finished arriving never moves again.
+   --------------------------------------------------------------------------- */
+
+/* A bar drawn at its final size, then revealed from the baseline upwards.
+
+   `clip-path` rather than `height` or `scaleY`, and the choice earns its keep
+   twice. Animating `height` would put every bar in the chart through layout on
+   every frame. Animating `scaleY` stays off the layout path but squashes the
+   bar's 4px top radius flat while it grows, so the corners visibly snap round at
+   the end of the run. An inset clip does neither: the bar is painted once, with
+   its corners already correct, and the animation only changes how much of that
+   painting is shown. */
+@keyframes evalio-bar-rise {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* The same idea turned on its side, for a track-and-fill meter. */
+@keyframes evalio-bar-fill {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Gridlines draw outwards from the axis before any bar arrives, so the chart
+   reads as a frame being ruled and then filled. */
+@keyframes evalio-grid-sweep {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+/* The mean rule lands last, on top of a chart that has settled — it is a
+   reading *of* the bars, so it cannot arrive before them. */
+@keyframes evalio-mark-drop {
+  from {
+    opacity: 0;
+    transform: scaleY(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Error: the mark snaps in and settles, once. Deliberately not a loop — an
    error stays on screen until it is dealt with, and a repeating shudder would
    be the definition of noise. */
@@ -246,6 +343,74 @@
      it acknowledges the load, it doesn't perform. */
   .page-enter {
     animation: evalio-fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* One-shot entrance for an item in a list — a stat tile, a table row, a
+     question card. The caller sets its own `animation-delay` inline, which is
+     what turns a set of these into a cascade.
+
+     `both` on every one of these matters more than it looks: without the
+     backwards fill, an element with a 300ms delay renders at its *finished*
+     state for those 300ms and then jumps back to the start to animate. A
+     staggered set would flash complete, then rebuild itself. */
+  .item-enter {
+    animation: evalio-fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* --- Controls -------------------------------------------------------- */
+
+  /* The base "this is clickable" response: a 1px lift under the cursor, a press
+     that gives back under the click. Every control gets it, on top of whatever
+     colour change it already had — the lift is a *property* nothing else in the
+     app animates, so adding it never overwrites an existing treatment.
+     `.pressable` supplies the transition too, which is why an element taking
+     this class drops its own `transition-colors`: that utility sits in a later
+     cascade layer and would narrow `transition-property` back down to colours,
+     silently killing the lift.
+
+     ⚠️ **Applied by hand, never as a global `button` selector.** Three kinds of
+     `<button>` in this app must not do this. The distribution chart draws one
+     per bar purely as a hover target and marks it `cursor-default` — lifting it
+     would promise a click that does nothing. The student runner's choices are
+     deliberately inert before submission (docs/FRONTEND.md §6). And the question
+     list's drag handle owns `cursor-grab`, which is its own affordance.
+
+     `:not(:disabled)` because a disabled button that still springs under the
+     cursor is worse than one that ignores it — it reads as broken rather than
+     as unavailable. */
+  .pressable {
+    transition-property: color, background-color, border-color, box-shadow, translate, scale;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .pressable:hover:not(:disabled) {
+    translate: 0 -1px;
+  }
+
+  .pressable:active:not(:disabled) {
+    translate: 0 1px;
+    scale: 0.99;
+  }
+
+  /* --- Data display ---------------------------------------------------- */
+
+  .bar-rise {
+    animation: evalio-bar-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .bar-fill {
+    animation: evalio-bar-fill 0.75s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .grid-sweep {
+    transform-origin: left;
+    animation: evalio-grid-sweep 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .mean-mark {
+    transform-origin: bottom;
+    animation: evalio-mark-drop 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
   /* --- Loading -------------------------------------------------------- */
@@ -297,9 +462,33 @@
   .page-enter,
   .logo-trace,
   .logo-breathe,
-  .logo-jolt {
+  .logo-jolt,
+  .item-enter,
+  .bar-rise,
+  .bar-fill,
+  .grid-sweep,
+  .mean-mark {
     animation: none;
   }
+
+  /* The colour change stays — that is feedback, not motion. Only the travel
+     goes, which is the part someone asking for reduced motion is asking about. */
+  .pressable {
+    transition: none;
+  }
+
+  .pressable:hover:not(:disabled),
+  .pressable:active:not(:disabled) {
+    translate: none;
+    scale: none;
+  }
+
+  /* The four data-display animations need nothing beyond `animation: none` to
+     land on their finished state, and that is by construction: `clip-path`,
+     `transform` and `opacity` are set *only* inside the keyframes, never as a
+     base style. Remove the animation and the bar is simply a full, unclipped,
+     untransformed bar. Setting a base `clip-path` on `.bar-rise` — the obvious
+     "improvement" — would break exactly this. */
 
   .logo-stroke,
   .logo-trace {

@@ -24,5 +24,6 @@ urlpatterns = [
     path("api/", include("classes.urls")),
     path("api/attempts/", include("attempts.urls")),
     path("api/feedback/", include("feedback.urls")),
+    path("api/", include("analytics.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]

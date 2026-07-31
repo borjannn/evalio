@@ -9,7 +9,7 @@ import { requireStudent } from "@/lib/auth";
 import type { FeedbackResult } from "@/lib/types";
 
 /**
- * §7.4 — ★ the feedback. The emotional centre of the product; everything else in
+ * docs/FRONTEND.md §7 — ★ the feedback. The emotional centre of the product; everything else in
  * the app exists to produce this screen.
  *
  * Four rules from the plan are load-bearing and easy to undo by accident:
@@ -62,7 +62,7 @@ export default async function AttemptResult({
         <Card>
           <CardBody className="p-8">
             {/* max-w-2xl and leading-relaxed put a line at 65–75 characters —
-                Guidelines §3's reading measure. This is the one place in the app
+                docs/FRONTEND.md §5's reading measure. This is the one place in the app
                 set for reading rather than scanning. */}
             <div className="max-w-2xl space-y-4 text-base leading-relaxed whitespace-pre-line">
               {result.feedback_text}
@@ -73,13 +73,13 @@ export default async function AttemptResult({
         <div className="flex flex-wrap items-center gap-4 text-sm">
           <Link
             href="/student"
-            className="rounded-md text-primary transition-colors hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="pressable rounded-md text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             Back to your quizzes
           </Link>
           <Link
             href="/student/history"
-            className="rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="pressable rounded-md text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             See all your results
           </Link>

@@ -224,7 +224,7 @@ function QuestionRow({
 }) {
   const [confirming, setConfirming] = useState(false);
 
-  // §5.7: a question whose wrong choices carry no explanation produces no student
+  // docs/FRONTEND.md §7: a question whose wrong choices carry no explanation produces no student
   // feedback. That should read as incomplete — a quiet affordance, not an error.
   const unexplained = question.choices.filter(
     (choice) => !choice.is_correct && !choice.feedback_text.trim(),

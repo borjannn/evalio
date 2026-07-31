@@ -1,11 +1,11 @@
 import { cn } from "@/lib/cn";
 
 /**
- * Loading affordances — FRONTEND_PLAN §9.
+ * Loading affordances — docs/FRONTEND.md §5.
  *
  * Two shapes, and which one to use is not a taste call:
  *
- * - **`<Skeleton>`** for anything whose layout is known ahead of time. §9 asks
+ * - **`<Skeleton>`** for anything whose layout is known ahead of time. docs/FRONTEND.md §5 asks
  *   for skeletons over spinners on card grids and tables, because a skeleton
  *   reserves the space the content will take and the page doesn't jump when it
  *   lands.
@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
  *   wait is the whole experience — the runner, a result being generated.
  *
  * Both loop, which is the one place this codebase's "nothing loops" rule bends
- * (Guidelines §7). A still progress indicator claims the work has stopped, and
+ * (docs/FRONTEND.md §5). A still progress indicator claims the work has stopped, and
  * these are the only animations that delete themselves: the moment data arrives
  * the element unmounts.
  */

@@ -7,7 +7,7 @@ import { requireTeacher } from "@/lib/auth";
 import type { AssignmentTargetType, QuizAssignment } from "@/lib/types";
 
 /**
- * Assignment mutations — FRONTEND_PLAN §5.8.
+ * Assignment mutations — docs/FRONTEND.md §7.
  *
  * Both re-check the role; ownership is Django's, and it checks all three targets
  * separately in `QuizAssignmentViewSet.perform_create` — assigning to a class or

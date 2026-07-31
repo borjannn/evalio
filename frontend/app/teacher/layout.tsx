@@ -7,7 +7,18 @@ import { logout } from "@/lib/actions";
 import { requireTeacher } from "@/lib/auth";
 
 /**
- * The teacher shell — sticky header, `max-w-6xl` container (Guidelines §4).
+ * The teacher shell — sticky header, `max-w-7xl` container.
+ *
+ * docs/FRONTEND.md §5 said `max-w-6xl`, and 1152px stopped being enough once the
+ * screens got denser: three metric badges no longer fit one line on a dashboard
+ * card, and the statistics table carries seven columns. The header and the main
+ * column have to carry the same value or the logo stops sitting above the
+ * content.
+ *
+ * ⚠️ This widens the *shell*, not the reading measure. Prose is still capped
+ * where it is set — `PageHeader`'s description at `max-w-2xl`, forms at
+ * `max-w-xl` — because a 1280px line of body text is unreadable no matter how
+ * much room the window has. Only grids and tables take up the extra space.
  *
  * A plain `app/teacher/layout.tsx` rather than a `(teacher)` route group: every
  * teacher screen already lives under /teacher/*, so a group would add a folder
@@ -28,7 +39,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
           header stays faintly visible, which is what makes a sticky bar read as
           a layer instead of a lid. */}
       <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex h-[72px] max-w-6xl items-center justify-between px-4">
+        <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-4">
           <div className="flex items-center gap-8">
             <Link
               href="/teacher"
@@ -42,6 +53,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
                 Dashboard
               </NavLink>
               <NavLink href="/teacher/classes">Classes</NavLink>
+              <NavLink href="/teacher/analytics">Statistics</NavLink>
             </nav>
           </div>
 
@@ -54,7 +66,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
                 type="submit"
                 title="Sign out"
                 aria-label="Sign out"
-                className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="pressable rounded-full p-2 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <LogOut size={18} />
               </button>
@@ -63,7 +75,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
         </div>
       </header>
 
-      <main className="page-enter mx-auto w-full max-w-6xl flex-1 space-y-10 px-4 py-10 md:px-6">
+      <main className="page-enter mx-auto w-full max-w-7xl flex-1 space-y-10 px-4 py-10 md:px-6">
         {children}
       </main>
     </div>

@@ -12,10 +12,10 @@ import { cn } from "@/lib/cn";
 import type { StudentQuestion } from "@/lib/types";
 
 /**
- * The quiz runner — FRONTEND_PLAN §7.3.
+ * The quiz runner — docs/FRONTEND.md §6.
  *
- * ⚠️ **Every colour decision in this file is a content decision.** §1 and
- * Guidelines §6.1: no colour coding, no checkmark iconography, nothing that
+ * ⚠️ **Every colour decision in this file is a content decision.**
+ * docs/FRONTEND.md §6: no colour coding, no checkmark iconography, nothing that
  * distinguishes one choice from another before submission — and the brand blue
  * does not exempt itself, because blue means "action" everywhere else in the app
  * and would read as endorsement here.
@@ -96,7 +96,7 @@ export function Runner({
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Heavily reduced chrome (§8): no nav links out. A student who wanders off
+      {/* Heavily reduced chrome (docs/FRONTEND.md §6): no nav links out. A student who wanders off
           mid-attempt loses their place, so the only way out is deliberate — and
           it says "Save & exit" because that is literally true, every answer
           having been written as it was made. */}
@@ -110,7 +110,7 @@ export function Runner({
           </div>
           <Link
             href="/student"
-            className="shrink-0 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="pressable shrink-0 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             Save &amp; exit
           </Link>
@@ -119,7 +119,7 @@ export function Runner({
 
       <main className="page-enter mx-auto w-full max-w-2xl flex-1 space-y-6 px-4 py-8">
         {/* Unmissable and persistent — this is the one screen where a dropped
-            request loses a student's work (§7.3). It stays until the retry
+            request loses a student's work (docs/FRONTEND.md §6). It stays until the retry
             succeeds; it is not a toast. */}
         {failed.length > 0 && (
           <div
@@ -193,7 +193,7 @@ export function Runner({
         />
 
         {/* Submission is irreversible, so the confirmation states the consequence
-            in full rather than asking "are you sure?" (§7.3). */}
+            in full rather than asking "are you sure?" (docs/FRONTEND.md §6). */}
         {confirming ? (
           <Card>
             <CardBody className="space-y-4">
@@ -229,7 +229,7 @@ export function Runner({
             <button
               type="button"
               onClick={() => setConfirming(true)}
-              className="rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="pressable rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
               Submit the quiz
             </button>
@@ -278,7 +278,7 @@ function ChoiceList({
                     // sr-only, so it takes focus on a mouse click too, and
                     // `focus-within` would leave a blue ring sitting on the
                     // chosen answer. Blue is the app's action colour — parked on
-                    // a selected choice it starts to read as endorsement (§1).
+                    // a selected choice it starts to read as endorsement (docs/FRONTEND.md §6).
                     "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
                     // Selection is marked in the text colour, never the brand
                     // blue and never a semantic tone. See this file's docblock:
@@ -298,7 +298,7 @@ function ChoiceList({
                     className="sr-only"
                   />
                   {/* A dot, not a tick. Checkmark iconography is banned outright
-                      in the student flow before submission (Guidelines §6.1). */}
+                      in the student flow before submission (docs/FRONTEND.md §6). */}
                   <span
                     aria-hidden="true"
                     className={cn(
@@ -317,7 +317,7 @@ function ChoiceList({
 
         {/* 🔒 The only permitted feedback on answering, and it is identical
             whichever choice was picked — this component has no way to tell them
-            apart, which is the point (§1). */}
+            apart, which is the point (docs/FRONTEND.md §6). */}
         <p aria-live="polite" className="h-5 text-sm text-muted-foreground">
           {answer?.status === "saving" && "Saving…"}
           {answer?.status === "saved" && "Saved"}
@@ -331,7 +331,7 @@ function ChoiceList({
 }
 
 /**
- * The numbered grid. §7.3: it **may only distinguish answered from unanswered**
+ * The numbered grid. docs/FRONTEND.md §6: it **may only distinguish answered from unanswered**
  * — a navigator that knew anything else would leak it at a glance.
  */
 function Navigator({
@@ -360,7 +360,7 @@ function Navigator({
                   answered ? "answered" : "not answered"
                 }`}
                 className={cn(
-                  "size-9 rounded-md font-mono text-xs tabular-nums transition-colors",
+                  "pressable size-9 rounded-md font-mono text-xs tabular-nums",
                   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                   answered
                     ? "bg-foreground text-background"

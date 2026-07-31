@@ -148,6 +148,21 @@ export type Topic = {
   description: string;
   quiz_count: number;
   question_bank_count: number;
+  /**
+   * **Submitted** attempts at every quiz in this topic — the dashboard card's
+   * "is there anything to read here" number, which is what makes it a signpost
+   * to `/teacher/analytics`.
+   *
+   * Exactly the set `/api/analytics/` reports on: in-progress attempts have no
+   * score and appear nowhere on that screen, so counting them here would send a
+   * teacher to a screen that disagreed with the card they came from. The two
+   * definitions live in `quizzes/views.py::submitted_attempt_count_subquery` and
+   * `analytics/selectors.py::submitted_attempts`, and a test asserts they agree.
+   *
+   * An annotation, so it exists on list and retrieve but not on the POST
+   * response — same caveat as `QuestionBank`'s counts.
+   */
+  attempt_count: number;
   created_by: number;
   created_at: string;
   updated_at: string;
@@ -208,6 +223,8 @@ export type Quiz = {
 export type TeacherQuizListItem = Quiz & {
   question_count: number;
   assignment_count: number;
+  /** Submitted attempts, counted the same way as `Topic.attempt_count`. */
+  attempt_count: number;
 };
 
 /**
@@ -226,7 +243,7 @@ export type QuizBuilderQuestion = TeacherQuestion & {
 };
 
 /**
- * `QuizStudentListSerializer` — GET /api/quizzes/ as a student, and what §7.1
+ * `QuizStudentListSerializer` — GET /api/quizzes/ as a student, and what docs/FRONTEND.md §7
  * renders.
  *
  * Narrower than `Quiz`, not wider, which is why it doesn't extend it:
@@ -235,13 +252,13 @@ export type QuizBuilderQuestion = TeacherQuestion & {
  * payload, so they must be absent from the type.
  *
  * The two attempt ids are the requesting student's own, as scalar subqueries, and
- * are what §7.1's Not started / In progress / Completed is read from. They live
+ * are what docs/FRONTEND.md §7's Not started / In progress / Completed is read from. They live
  * here rather than being matched client-side against `GET /attempts/` because
  * that list is paginated at 25: a student with more attempts than that would see
  * finished quizzes reported as untouched.
  *
  * ⚠️ Ids only — no score, no correctness. This shape is read *before* a quiz is
- * taken (§1).
+ * taken (docs/FRONTEND.md §6).
  */
 export type StudentQuizListItem = {
   id: number;
@@ -455,7 +472,7 @@ export type TeacherAttemptDetail = {
 };
 
 /**
- * `GET /api/quizzes/{id}/results/` — the whole §5.11 screen in one response.
+ * `GET /api/quizzes/{id}/results/` — the whole docs/FRONTEND.md §7 screen in one response.
  *
  * **Unpaginated**, like `audience/`: the rows *are* the audience, and a mean
  * score computed over page 1 would be a lie. See Known gaps for the cohort size
@@ -495,6 +512,88 @@ export type AnswerSaved = {
   choice_id: number;
   saved: true;
 };
+
+/* -------------------------------------------------------------------------- */
+/* Analytics — analytics/selectors.py                                          */
+/* -------------------------------------------------------------------------- */
+
+/** The dimensions `GET /api/analytics/` can group by, in the order it lists them. */
+export const GROUPINGS = ["class", "group", "topic", "quiz", "question", "student"] as const;
+export type Grouping = (typeof GROUPINGS)[number];
+
+/**
+ * Decile histogram. `buckets[i]` counts values in `labels[i]`, and `unit` names
+ * what is being counted — attempts for score groupings, questions for accuracy.
+ */
+export type Distribution = {
+  labels: string[];
+  buckets: number[];
+  unit: string;
+};
+
+/** Shared by every score row and by the score summary. */
+type ScoreStats = {
+  attempt_count: number;
+  /** `null`, never `0`, when nothing has been submitted — the two are different facts. */
+  mean_score_percent: number | null;
+  median_score_percent: number | null;
+  min_score_percent: number | null;
+  max_score_percent: number | null;
+  distribution: number[];
+};
+
+export type ScoreRow = ScoreStats & {
+  key: string;
+  label: string;
+  sublabel: string | null;
+  student_count: number;
+};
+
+/** One question *on one quiz* — never pooled across quizzes that share it. */
+export type QuestionRow = {
+  key: string;
+  label: string;
+  sublabel: string;
+  order: number;
+  /** The accuracy denominator: submitted attempts on that quiz. */
+  submitted_count: number;
+  answered_count: number;
+  correct_count: number;
+  unanswered_count: number;
+  accuracy_percent: number | null;
+  choices: { text: string; is_correct: boolean; count: number }[];
+};
+
+export type ScoreAnalytics = {
+  group_by: Exclude<Grouping, "question">;
+  metric: "score";
+  summary: ScoreStats & { row_count: number; student_count: number };
+  distribution: Distribution;
+  rows: ScoreRow[];
+};
+
+export type AccuracyAnalytics = {
+  group_by: "question";
+  metric: "accuracy";
+  summary: {
+    row_count: number;
+    attempt_count: number;
+    student_count: number;
+    answered_count: number;
+    correct_count: number;
+    mean_accuracy_percent: number | null;
+  };
+  distribution: Distribution;
+  rows: QuestionRow[];
+};
+
+/**
+ * Discriminated on `metric`, so narrowing on it gives the right `rows` shape.
+ * The two are genuinely different — a question has no score to average — and
+ * flattening them into one optional-everything type would push that difference
+ * into every component that reads a row.
+ */
+export type Analytics = ScoreAnalytics | AccuracyAnalytics;
 
 /* -------------------------------------------------------------------------- */
 /* Feedback — feedback/serializers.py                                          */

@@ -60,6 +60,35 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         return value
 
 
+class EnrollmentInviteSerializer(serializers.Serializer):
+    """Input for `POST /api/enrollments/invite/` — enrol by exact username.
+
+    This is the route from a freshly registered account onto its first roster, and
+    it exists because `students_visible_to` deliberately cannot provide one: the
+    directory search only returns students *already* enrolled with the searching
+    teacher, so a new account matches nobody's search and nobody can enrol them.
+
+    **Exact match, no listing, no fuzzy fallback.** That is the whole security
+    design. A `icontains` here, or a lookup endpoint that answered "found / not
+    found" without enrolling, would recreate the enumeration hole the scoped
+    search exists to close. Resolution happens *inside* the write, so the only way
+    to learn a username exists is to enrol its owner — a visible act with a row
+    behind it, not a silent probe.
+
+    Not a `ModelSerializer`: the input is a username and a class, and the output is
+    an `Enrollment`. Those are different shapes, so the view serializes its own
+    response with `EnrollmentSerializer`.
+    """
+
+    school_class = serializers.PrimaryKeyRelatedField(queryset=Class.objects.all())
+    username = serializers.CharField(max_length=150, trim_whitespace=True)
+
+    def validate_username(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Enter a username.")
+        return value.strip()
+
+
 class TeachingGroupSerializer(serializers.ModelSerializer):
     class_name = serializers.CharField(source="school_class.name", read_only=True)
     topic_name = serializers.CharField(source="topic.name", read_only=True)

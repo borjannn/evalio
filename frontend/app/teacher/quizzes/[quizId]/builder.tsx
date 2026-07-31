@@ -7,7 +7,7 @@ import { useActionState, useState, useTransition } from "react";
 import { QuestionForm } from "@/components/question-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, CardBody, CardFooter } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { Section } from "@/components/ui/section";
@@ -32,7 +32,7 @@ import { QuestionList } from "./question-list";
 import { QuestionRow } from "./question-row";
 
 /**
- * ★ The quiz builder — FRONTEND_PLAN §5.3.
+ * ★ The quiz builder — docs/FRONTEND.md §8.
  *
  * ⚠️ Teacher-only. Receives the answer key on every choice; see the page docblock.
  *
@@ -61,7 +61,7 @@ export function QuizBuilder({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // Editing loads the question again to get its reuse counts — the quiz detail
-  // shape has none, and without them §5.4's shared-question warning would either
+  // shape has none, and without them docs/FRONTEND.md §9's shared-question warning would either
   // be silent or invented.
   const [editing, setEditing] = useState<TeacherQuestionWithUsage | null>(null);
   const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
@@ -127,7 +127,7 @@ export function QuizBuilder({
     commitOrder(next);
   }
 
-  // §5.4 wants a bank preselected so the field is never empty. Every topic starts
+  // docs/FRONTEND.md §9 wants a bank preselected so the field is never empty. Every topic starts
   // with "Uncategorised"; fall back to the first bank if it was deleted.
   const defaultBank =
     banks.find((bank) => bank.name === "Uncategorised") ?? banks[0];
@@ -135,7 +135,9 @@ export function QuizBuilder({
   return (
     <div className="space-y-8">
       {editingDetails ? (
-        <Card className="w-full max-w-2xl">
+        /* Centred like the other inline forms — it replaces the header in
+            place, so a left-flush card would jump the title sideways. */
+        <Card className="mx-auto w-full max-w-2xl">
           <CardBody className="space-y-4 p-6">
             <form action={detailsAction} className="space-y-4">
               <input type="hidden" name="id" value={quiz.id} />
@@ -177,82 +179,103 @@ export function QuizBuilder({
           </CardBody>
         </Card>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-2">
-              <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-semibold tracking-tight">{quiz.title}</h1>
-                {/* Draft vs Published is the highest-consequence fact on this
-                    screen: an unpublished quiz is invisible to students even when
-                    assigned. */}
-                <Badge tone={quiz.is_published ? "success" : "neutral"}>
-                  {quiz.is_published ? "Published" : "Draft"}
-                </Badge>
-                <button
-                  type="button"
-                  onClick={() => setEditingDetails(true)}
-                  aria-label="Edit title and description"
-                  className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <Pencil size={16} />
-                </button>
-              </div>
-              {quiz.description && (
-                <p className="max-w-2xl text-muted-foreground">{quiz.description}</p>
-              )}
-            </div>
+        /* One card, not four things floating on the page ground.
 
-            <div className="flex shrink-0 items-center gap-3">
-              <Link
-                href={`/teacher/quizzes/${quiz.id}/results`}
-                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                Results
-              </Link>
-              <Link
-                href={`/teacher/quizzes/${quiz.id}/assign`}
-                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                Assign
-              </Link>
-              {/* Publishing is a soft flag — a published quiz stays editable and
-                  un-publishing keeps existing attempts — so it needs no confirm. */}
-              <form action={setPublished}>
+           The identity (title, state, rename), the side trips (Results, Assign),
+           the state change (Publish) and the destruction (Delete) were four
+           groups with nothing drawing the lines between them, so they read as a
+           row of loose words. Now: identity left, actions right, and the
+           destructive one alone below the rule — which is also the order of how
+           often a teacher reaches for them. */
+        <Card>
+          <CardBody className="p-6">
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-5">
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h1 className="text-3xl font-semibold tracking-tight">{quiz.title}</h1>
+                  {/* Draft vs Published is the highest-consequence fact on this
+                      screen: an unpublished quiz is invisible to students even
+                      when assigned. */}
+                  <Badge tone={quiz.is_published ? "success" : "neutral"}>
+                    {quiz.is_published ? "Published" : "Draft"}
+                  </Badge>
+                  <button
+                    type="button"
+                    onClick={() => setEditingDetails(true)}
+                    aria-label="Edit title and description"
+                    className="pressable rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                </div>
+                {quiz.description && (
+                  <p className="max-w-2xl text-muted-foreground">{quiz.description}</p>
+                )}
+              </div>
+
+              <div className="flex shrink-0 flex-wrap items-center gap-3">
+                {/* Results and Assign share a recessed track, the same segmented
+                    pattern as the statistics grouping picker. They belong
+                    together — both leave this screen to look at the quiz from
+                    somewhere else — and neither changes anything, which is what
+                    separates them from the button beside them. */}
+                <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-secondary/50 p-1">
+                  <Link
+                    href={`/teacher/quizzes/${quiz.id}/results`}
+                    className="pressable rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  >
+                    Results
+                  </Link>
+                  <Link
+                    href={`/teacher/quizzes/${quiz.id}/assign`}
+                    className="pressable rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  >
+                    Assign
+                  </Link>
+                </div>
+                {/* Publishing is a soft flag — a published quiz stays editable and
+                    un-publishing keeps existing attempts — so it needs no confirm. */}
+                <form action={setPublished}>
+                  <input type="hidden" name="id" value={quiz.id} />
+                  <input type="hidden" name="published" value={String(!quiz.is_published)} />
+                  <Button type="submit" variant={quiz.is_published ? "secondary" : "primary"}>
+                    {quiz.is_published ? "Unpublish" : "Publish"}
+                  </Button>
+                </form>
+              </div>
+            </div>
+          </CardBody>
+
+          {/* Below the rule, on the footer tint: the one action here you cannot
+              undo does not belong in the same row as the ones you can. */}
+          <CardFooter>
+            {confirmingDelete ? (
+              <form action={deleteQuiz} className="flex flex-wrap items-center gap-3">
                 <input type="hidden" name="id" value={quiz.id} />
-                <input type="hidden" name="published" value={String(!quiz.is_published)} />
-                <Button type="submit" variant={quiz.is_published ? "secondary" : "primary"}>
-                  {quiz.is_published ? "Unpublish" : "Publish"}
+                <input type="hidden" name="topic" value={quiz.topic} />
+                <span className="text-sm text-muted-foreground">
+                  Delete this quiz? Its questions stay in their banks, but any attempts and
+                  results go with it.
+                </span>
+                <Button type="submit" variant="destructive">
+                  Delete quiz
+                </Button>
+                <Button variant="secondary" onClick={() => setConfirmingDelete(false)}>
+                  Cancel
                 </Button>
               </form>
-            </div>
-          </div>
-
-          {confirmingDelete ? (
-            <form action={deleteQuiz} className="flex flex-wrap items-center gap-3">
-              <input type="hidden" name="id" value={quiz.id} />
-              <input type="hidden" name="topic" value={quiz.topic} />
-              <span className="text-sm text-muted-foreground">
-                Delete this quiz? Its questions stay in their banks, but any attempts and
-                results go with it.
-              </span>
-              <Button type="submit" variant="destructive">
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                className="pressable inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <Trash2 size={14} />
                 Delete quiz
-              </Button>
-              <Button variant="secondary" onClick={() => setConfirmingDelete(false)}>
-                Cancel
-              </Button>
-            </form>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              <Trash2 size={14} />
-              Delete quiz
-            </button>
-          )}
-        </div>
+              </button>
+            )}
+          </CardFooter>
+        </Card>
       )}
 
       <Section
@@ -337,7 +360,7 @@ export function QuizBuilder({
             renderItem={(question, index, handle) =>
               // Editing replaces the row in place, so the sequence stays legible
               // and the form appears where the teacher was looking. It is the
-              // same §5.4 form, which warns before changing a shared question.
+              // same docs/FRONTEND.md §9 form, which warns before changing a shared question.
               editing?.id === question.id ? (
                 <QuestionForm
                   topicId={quiz.topic}
@@ -383,7 +406,7 @@ function PathTab({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors",
+        "pressable inline-flex items-center gap-2 rounded-sm px-3 py-1.5 text-sm font-medium",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         active
           ? "bg-white text-foreground"

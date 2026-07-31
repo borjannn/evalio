@@ -88,7 +88,7 @@ def assignment_audience(quiz):
 
 
 def question_accuracy(quiz):
-    """Per-question performance on one quiz — FRONTEND_PLAN §5.11.
+    """Per-question performance on one quiz — docs/FRONTEND.md §7.
 
     The genuinely useful teacher insight on the results screen: a question
     everyone fails is usually a badly written question, and that is invisible in
@@ -136,7 +136,7 @@ def question_accuracy(quiz):
 def quiz_result_rows(quiz):
     """One row per student who should have taken this quiz, with their attempt.
 
-    The results table is a roster, not an attempt log: FRONTEND_PLAN §5.11 says
+    The results table is a roster, not an attempt log: docs/FRONTEND.md §7 says
     "Not started" rows matter as much as submitted ones, because chasing the
     people who haven't started is most of what the screen is for. So the rows
     come from `assignment_audience` — who the quiz reaches — and attempts are

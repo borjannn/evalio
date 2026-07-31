@@ -24,9 +24,20 @@ from .serializers import (
 class StartAttemptView(APIView):
     """POST /api/attempts/start/  { "quiz_id": 1 }
 
-    Returns the student's in-progress attempt if one exists rather than creating a
-    second. Starting fresh on every call meant a refresh mid-quiz silently abandoned
-    the answers already given.
+    **One attempt per student per quiz**, enforced here.
+
+    - An in-progress attempt is returned rather than replaced (200). Starting fresh
+      on every call meant a refresh mid-quiz silently abandoned the answers already
+      given.
+    - A **submitted** attempt closes the quiz for good (409). The UI has never
+      offered a way to retake — the student home shows "View feedback" once a quiz
+      is done — and before this the API would happily mint a second attempt for
+      anyone who reached the intro screen by typing its URL, quietly replacing the
+      score their teacher had already seen.
+
+    409 rather than 403: the request is not forbidden, it conflicts with something
+    that already exists, and the client needs to tell those apart to send the
+    student to their result instead of to an error.
     """
 
     permission_classes = [IsStudent]
@@ -47,6 +58,22 @@ class StartAttemptView(APIView):
         ).first()
         if attempt is not None:
             return Response(QuizAttemptSerializer(attempt).data, status=status.HTTP_200_OK)
+
+        submitted = (
+            QuizAttempt.objects.filter(
+                student=request.user, quiz=quiz, submitted_at__isnull=False
+            )
+            .order_by("-submitted_at")
+            .first()
+        )
+        if submitted is not None:
+            return Response(
+                {
+                    "detail": "You have already completed this quiz.",
+                    "attempt_id": submitted.pk,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         attempt = QuizAttempt.objects.create(student=request.user, quiz=quiz)
         return Response(QuizAttemptSerializer(attempt).data, status=status.HTTP_201_CREATED)
@@ -131,7 +158,7 @@ class AttemptDetailView(generics.RetrieveAPIView):
       attempt. Safe because `AnswerResponseSerializer` withholds `is_correct`
       until `submitted_at` is set and never exposes the snapshotted explanation.
     - **Teacher** — `QuizAttemptTeacherSerializer`, which does expose the
-      snapshots, for the §5.12 attempt review. Reachable only for attempts on a
+      snapshots, for the docs/FRONTEND.md §7 attempt review. Reachable only for attempts on a
       quiz they created; the queryset below is what enforces that.
 
     The switch is on `is_teacher`, so a student can never select the teacher

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from classes.models import QuizAssignment
@@ -69,6 +70,47 @@ class StartAttemptTests(AttemptLifecycleTestCase):
         self.client.force_authenticate(self.teacher)
         response = self.client.post("/api/attempts/start/", {"quiz_id": self.quiz.id}, format="json")
         self.assertEqual(response.status_code, 403)
+
+    def test_starting_after_submitting_is_refused(self):
+        """One attempt per student per quiz.
+
+        Without this the intro screen — reachable by typing its URL after the
+        quiz is done — would mint a second attempt and quietly replace the score
+        the teacher had already seen.
+        """
+        self.assign()
+        submitted = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        submitted.submitted_at = timezone.now()
+        submitted.save()
+
+        self.client.force_authenticate(self.student)
+        response = self.client.post("/api/attempts/start/", {"quiz_id": self.quiz.id}, format="json")
+
+        # 409, not 403: the request is not forbidden, it conflicts with
+        # something that exists, and the client tells them apart to send the
+        # student to their result rather than to an error.
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["attempt_id"], submitted.pk)
+        self.assertEqual(QuizAttempt.objects.count(), 1)
+
+    def test_an_unsubmitted_attempt_still_resumes_after_an_earlier_one_was_submitted(self):
+        """Belt and braces: the in-progress branch is checked first.
+
+        Only reachable for data created before the 409 existed, but a student
+        holding an open attempt must be able to finish it rather than be locked
+        out by their own earlier submission.
+        """
+        self.assign()
+        old = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        old.submitted_at = timezone.now()
+        old.save()
+        live = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+
+        self.client.force_authenticate(self.student)
+        response = self.client.post("/api/attempts/start/", {"quiz_id": self.quiz.id}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], live.pk)
 
 
 class AnswerTests(AttemptLifecycleTestCase):

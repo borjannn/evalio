@@ -24,7 +24,7 @@ export type AuthFormState = {
  * Letting anyone self-select "teacher" would hand out the entire authoring API
  * plus a view of other teachers' students.
  *
- * Do not add a role control to the form. See FRONTEND_PLAN §6.2.
+ * Do not add a role control to the form. See docs/FRONTEND.md §7.
  */
 export async function register(
   _previous: AuthFormState,

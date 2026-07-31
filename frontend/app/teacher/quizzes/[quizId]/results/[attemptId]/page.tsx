@@ -16,7 +16,7 @@ import type {
 } from "@/lib/types";
 
 /**
- * §5.12 — one student's attempt: the score, the passage they were given, then
+ * docs/FRONTEND.md §7 — one student's attempt: the score, the passage they were given, then
  * every question with the choice they picked beside the correct one.
  *
  * ⚠️ Teacher-only, and the most answer-key-dense screen in the app. It renders
@@ -80,7 +80,7 @@ export default async function AttemptDetailPage({
       <div className="space-y-4">
         <Link
           href={`/teacher/quizzes/${quiz.id}/results`}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="pressable inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft size={14} />
           Results

@@ -13,8 +13,11 @@ import { ErrorPreview } from "./error-preview";
  * Internal reference — renders every token and every shared primitive so a
  * change to the design system is visible in one place.
  *
- * Not part of the product and not linked from anywhere. It earns its keep while
- * the remaining screens are built; delete it when they are done.
+ * Not part of the product and not linked from anywhere. **Kept deliberately**:
+ * this used to say "delete it when the remaining screens are built", and they
+ * are, but it turned out to be the only place the loading and error states can
+ * be seen side by side — they are otherwise visible only by catching a route
+ * mid-fetch or breaking one on purpose. Add new primitives here as they land.
  */
 
 export const metadata = { title: "Design system — Evalio" };
@@ -87,7 +90,7 @@ export default function DesignSystemCheck() {
       <Section title="Buttons">
         <p className="text-sm text-muted-foreground">
           Tab through these — every focus ring is grey (<code className="font-mono">--color-ring</code>),
-          per Guidelines §6.2.
+          per docs/FRONTEND.md §6.
         </p>
         <div className="flex flex-wrap gap-3">
           <Button>

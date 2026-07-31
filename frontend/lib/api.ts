@@ -115,6 +115,46 @@ export function apiGet<T>(path: string, options?: RequestOptions): Promise<T> {
   return request<T>("GET", path, undefined, options);
 }
 
+/**
+ * Every page of a paginated endpoint, concatenated.
+ *
+ * For lists that are **not** browsed but *chosen from*: the topics behind a
+ * group's topic picker, the classes and groups behind the assign screen's
+ * targets. A `<Pager>` is the answer when a teacher is reading a list; it is no
+ * answer at all when the list is `<option>`s, because a topic sitting on page 2
+ * is simply unpickable and nothing on screen explains why.
+ *
+ * Serial by necessity — `next` is only known once the previous page is back —
+ * so keep it to option-sized lists. `maxPages` is a stop against a pathological
+ * account rather than a tuning knob: hitting it returns what it has, which for a
+ * picker degrades to today's behaviour rather than hanging the page.
+ */
+export async function apiGetAll<T>(
+  path: string,
+  options?: RequestOptions & { maxPages?: number },
+): Promise<T[]> {
+  const { maxPages = 20, ...requestOptions } = options ?? {};
+  const separator = path.includes("?") ? "&" : "?";
+  const results: T[] = [];
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    // Counting pages rather than following the envelope's `next`. `next` is an
+    // absolute URL built from the request *Django* saw, so behind a container or
+    // a proxy its host is not necessarily one this process can slice a path back
+    // out of. The page number is ours either way.
+    const body: { results: T[]; next: string | null } = await request(
+      "GET",
+      `${path}${separator}page=${page}`,
+      undefined,
+      requestOptions,
+    );
+    results.push(...body.results);
+    if (!body.next) break;
+  }
+
+  return results;
+}
+
 export function apiPost<T>(
   path: string,
   body?: unknown,

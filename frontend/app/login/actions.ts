@@ -56,7 +56,7 @@ export async function login(
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
       // One message for both cases, deliberately. Saying which field was wrong
-      // confirms whether a username exists — see FRONTEND_PLAN §6.1.
+      // confirms whether a username exists — see docs/FRONTEND.md §7.
       return { error: "Incorrect username or password.", username };
     }
     throw error;

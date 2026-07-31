@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Label } from "@/components/ui/field";
+import { Pager } from "@/components/ui/pager";
+import { accentStyle } from "@/lib/accent";
 import type { Paginated, SchoolClass, TeachingGroup, Topic } from "@/lib/types";
 
 import {
@@ -22,7 +24,7 @@ import {
 } from "./actions";
 
 /**
- * FRONTEND_PLAN §5.9.
+ * docs/FRONTEND.md §7.
  *
  * A class is a card; its subject groups are indented rows *inside* that card.
  * The nesting is the whole point — a teacher who reads "5B — Mathematics" as a
@@ -30,10 +32,16 @@ import {
  */
 export function ClassList({
   classes,
+  count,
+  page,
   groups,
   topics,
 }: {
   classes: SchoolClass[];
+  /** Total classes, from the pagination envelope. */
+  count: number;
+  page: number;
+  /** Every group belonging to the classes on this page — see the page's docblock. */
   groups: TeachingGroup[];
   topics: Topic[];
 }) {
@@ -56,26 +64,32 @@ export function ClassList({
         />
       ) : (
         <div className="space-y-4">
-          {classes.map((schoolClass) => (
+          {classes.map((schoolClass, index) => (
             <ClassCard
               key={schoolClass.id}
               schoolClass={schoolClass}
+              index={index}
               groups={groups.filter((group) => group.school_class === schoolClass.id)}
               topics={topics}
             />
           ))}
         </div>
       )}
+
+      <Pager page={page} count={count} basePath="/teacher/classes" label="Classes" />
     </div>
   );
 }
 
 function ClassCard({
   schoolClass,
+  index,
   groups,
   topics,
 }: {
   schoolClass: SchoolClass;
+  /** Position on the page — its place in the entrance cascade, nothing more. */
+  index: number;
   groups: TeachingGroup[];
   topics: Topic[];
 }) {
@@ -98,23 +112,39 @@ function ClassCard({
   const available = topics.filter((topic) => !used.has(topic.id));
 
   return (
-    <Card>
+    <Card
+      // Same identity-colour system as the topic cards on the dashboard — a
+      // class keeps its hue across sessions, because it comes from the id.
+      style={{ ...accentStyle(schoolClass.id), animationDelay: `${index * 60}ms` }}
+      className="item-enter"
+    >
       <CardBody className="space-y-4">
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            <Link
-              href={`/teacher/classes/${schoolClass.id}`}
-              className="text-lg font-semibold tracking-tight hover:text-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          <div className="flex min-w-0 items-start gap-3">
+            <span
+              aria-hidden="true"
+              className="grid size-9 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]"
             >
-              {schoolClass.name}
-            </Link>
-            <div className="flex items-center gap-2">
-              <Badge>{schoolClass.school_year}</Badge>
-              <Badge>
-                <Users size={14} />
-                {schoolClass.student_count}{" "}
-                {schoolClass.student_count === 1 ? "student" : "students"}
-              </Badge>
+              <Users size={18} />
+            </span>
+            <div className="min-w-0 space-y-1">
+              <Link
+                href={`/teacher/classes/${schoolClass.id}`}
+                className="block text-lg font-semibold tracking-tight transition-colors hover:text-[var(--accent)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none motion-reduce:transition-none"
+              >
+                {schoolClass.name}
+              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge>{schoolClass.school_year}</Badge>
+                {/* Accented once there is a roster — the same "this one has
+                    something in it" signal the topic cards use, and the same
+                    reason it is identity colour rather than a status tone. */}
+                <Badge tone={schoolClass.student_count > 0 ? "accent" : "neutral"}>
+                  <Users size={14} />
+                  {schoolClass.student_count}{" "}
+                  {schoolClass.student_count === 1 ? "student" : "students"}
+                </Badge>
+              </div>
             </div>
           </div>
 
@@ -122,7 +152,7 @@ function ClassCard({
             type="button"
             onClick={() => setConfirming(true)}
             aria-label={`Delete ${schoolClass.name}`}
-            className="shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="pressable shrink-0 rounded-md p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             <Trash2 size={16} />
           </button>
@@ -181,7 +211,7 @@ function ClassCard({
                 <button
                   type="submit"
                   aria-label={`Delete the ${group.topic_name} group`}
-                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  className="pressable rounded-md p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -268,7 +298,9 @@ function NewClass({ children }: { children: React.ReactNode }) {
       </div>
 
       {open && (
-        <Card className="w-full max-w-xl">
+        /* Centred, matching `NewTopic` and `NewQuiz` — the three inline
+            create-forms are the same pattern and must not sit differently. */
+        <Card className="mx-auto w-full max-w-xl">
           <CardBody className="space-y-4 p-6">
             <h2 className="text-lg font-semibold tracking-tight">New class</h2>
             <form action={formAction} className="space-y-4">

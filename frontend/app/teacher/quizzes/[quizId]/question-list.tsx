@@ -5,7 +5,7 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 
 /**
- * The reorder interaction for the quiz builder's question list (§5.3).
+ * The reorder interaction for the quiz builder's question list (docs/FRONTEND.md §8).
  *
  * It owns *only* the mechanics — geometry, drag state, the insertion line — and
  * knows nothing about questions beyond `id`. What each row looks like is

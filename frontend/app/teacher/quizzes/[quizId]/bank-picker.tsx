@@ -11,7 +11,7 @@ import type { QuestionBank, TeacherQuestionWithUsage } from "@/lib/types";
 import { addQuestionToQuiz, searchBankQuestions } from "./actions";
 
 /**
- * "Add from a bank" — FRONTEND_PLAN §5.5.
+ * "Add from a bank" — docs/FRONTEND.md §8.
  *
  * Two behaviours have to work without a mode switch:
  *

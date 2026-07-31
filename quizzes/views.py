@@ -1,4 +1,5 @@
-from django.db.models import Count, OuterRef, Prefetch, Q, Subquery
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery
+from django.db.models.functions import Coalesce
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -43,6 +44,63 @@ def questions_with_usage():
     )
 
 
+def submitted_attempt_count_subquery(lookup):
+    """How many **submitted** attempts a row has, as a scalar subquery not a join.
+
+    `lookup` is the path from `QuizAttempt` back to the row being annotated:
+    `"quiz"` when annotating a Quiz, `"quiz__topic"` when annotating a Topic.
+
+    ⚠️ The filter pair is `analytics/selectors.py::submitted_attempts` verbatim,
+    and copying it is the point rather than an accident. This number exists so a
+    teacher can see from the dashboard which topics have statistics worth
+    opening; if it counted a wider set than the statistics screen does, it would
+    send them to a screen that then disagreed with the card they came from.
+    Change one, change the other.
+
+    `feedback__isnull=False` looks redundant beside `submitted_at__isnull=False`
+    and is not quite: `SubmitAttemptView` stamps `submitted_at` and calls
+    `generate_feedback` in two steps without a transaction, so a request that
+    dies between them leaves a submitted attempt with nothing to score. The
+    statistics screen skips those, so this skips them too.
+
+    ⚠️ Not `Count("attempts", distinct=True)`, even though that is what the
+    counts beside it use. Those already join two tables; adding a third makes the
+    intermediate result their product — a quiz with 20 questions, 3 assignments
+    and 200 attempts would build 12,000 rows for the database to deduplicate, and
+    a topic is worse again because its attempts arrive through its quizzes. The
+    answers would be *correct* (that is what `distinct=True` buys) and the query
+    would get slower in proportion to numbers that only grow. A subquery is
+    evaluated per row and joins nothing.
+
+    Two details that look removable and are not:
+
+    - `.order_by()` clears `QuizAttempt.Meta.ordering`. Left on, the ordering
+      column joins the GROUP BY and splits the count into one row per attempt,
+      so the subquery returns the first of many 1s instead of the total.
+    - `Coalesce(..., 0)` because a row with no attempts matches nothing and the
+      subquery yields NULL. Zero is the honest answer here — unlike a mean score,
+      where "nobody has submitted" and "everyone scored zero" are different facts,
+      a count of nothing genuinely is nought.
+    """
+    from attempts.models import QuizAttempt
+
+    return Coalesce(
+        Subquery(
+            QuizAttempt.objects.filter(
+                submitted_at__isnull=False,
+                feedback__isnull=False,
+                **{lookup: OuterRef("pk")},
+            )
+            .order_by()
+            .values(lookup)
+            .annotate(total=Count("pk"))
+            .values("total"),
+            output_field=IntegerField(),
+        ),
+        0,
+    )
+
+
 class TopicViewSet(viewsets.ModelViewSet):
     queryset = Topic.objects.all()
     serializer_class = TopicSerializer
@@ -60,6 +118,11 @@ class TopicViewSet(viewsets.ModelViewSet):
                 .annotate(
                     quiz_count=Count("quizzes", distinct=True),
                     question_bank_count=Count("question_banks", distinct=True),
+                    # Submitted attempts at every quiz in the topic — the
+                    # dashboard card's "is there anything to read here?" number,
+                    # which is why it counts the same set the statistics screen
+                    # does rather than everything that was ever started.
+                    attempt_count=submitted_attempt_count_subquery("quiz__topic"),
                 )
                 .order_by("-created_at")
             )
@@ -166,7 +229,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
 
         # `?topic=` is what the quiz builder's bank picker searches on: a teacher
         # usually remembers the question, not which bank they filed it in, so the
-        # picker has to search every bank in the topic at once (FRONTEND_PLAN §5.5).
+        # picker has to search every bank in the topic at once (docs/FRONTEND.md §8).
         topic_id = self.request.query_params.get("topic")
         if topic_id:
             queryset = queryset.filter(question_bank__topic_id=topic_id)
@@ -221,6 +284,7 @@ class QuizViewSet(viewsets.ModelViewSet):
                 queryset = queryset.annotate(
                     question_count=Count("questions", distinct=True),
                     assignment_count=Count("assignments", distinct=True),
+                    attempt_count=submitted_attempt_count_subquery("quiz"),
                 ).order_by("-created_at")
             return queryset
 
@@ -233,7 +297,7 @@ class QuizViewSet(viewsets.ModelViewSet):
 
             # This student's own attempts on each quiz, as scalar subqueries. The
             # student home screen turns them into Not started / In progress /
-            # Completed (FRONTEND_PLAN §7.1). Two subqueries rather than a join,
+            # Completed (docs/FRONTEND.md §7). Two subqueries rather than a join,
             # so neither can multiply the question count below, and neither costs
             # a query per row.
             def latest_attempt(**filters):
@@ -356,7 +420,7 @@ class QuizViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], permission_classes=[IsTeacher, IsOwner])
     def results(self, request, pk=None):
-        """GET /api/quizzes/{id}/results/ — everything the §5.11 screen shows.
+        """GET /api/quizzes/{id}/results/ — everything the docs/FRONTEND.md §7 screen shows.
 
         One endpoint for one screen: a roster row per student the quiz reaches,
         the header summary, and per-question accuracy. They are three shapes but
@@ -426,7 +490,7 @@ class QuizViewSet(viewsets.ModelViewSet):
     def audience(self, request, pk=None):
         """GET /api/quizzes/{id}/audience/ — who this quiz's assignments reach.
 
-        The assign screen (FRONTEND_PLAN §5.8) needs the deduplicated total, and
+        The assign screen (docs/FRONTEND.md §7) needs the deduplicated total, and
         needs to mark an individual who is already covered by an assigned class
         with the reason. Both come from `assignment_audience`, the inverse of the
         selector that decides what a student may see — see quizzes/selectors.py.
