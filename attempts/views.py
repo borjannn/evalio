@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -113,12 +114,30 @@ class AnswerQuestionView(APIView):
 
 
 class SubmitAttemptView(APIView):
-    """POST /api/attempts/<attempt_id>/submit/  -> locks the attempt, triggers scoring."""
+    """POST /api/attempts/<attempt_id>/submit/  -> locks the attempt, triggers scoring.
+
+    The stamp and the scoring are **one transaction**. They are two writes, and a
+    request that died between them used to leave an attempt marked submitted with
+    no `FeedbackResult` — permanently, because `submit/` then rejects it with a 400
+    for already being submitted. The student had finished the quiz and could never
+    see a score, and only a manual fix could recover it.
+
+    Two places in the codebase currently work around exactly that state:
+    `quizzes/views.py::submitted_attempt_count_subquery` and
+    `analytics/selectors.py::submitted_attempts` both filter on
+    `feedback__isnull=False` so the orphans stay out of the statistics. Those
+    filters are still correct for historical rows — this stops new ones appearing.
+    """
 
     permission_classes = [IsStudent]
 
+    @transaction.atomic
     def post(self, request, attempt_id):
-        attempt = get_object_or_404(QuizAttempt, pk=attempt_id, student=request.user)
+        # Locked for the duration, so two submits racing from a double-tapped
+        # button cannot both pass the check below and score the attempt twice.
+        attempt = get_object_or_404(
+            QuizAttempt.objects.select_for_update(), pk=attempt_id, student=request.user
+        )
         if attempt.submitted_at is not None:
             return Response({"detail": "Already submitted."}, status=status.HTTP_400_BAD_REQUEST)
 
