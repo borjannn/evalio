@@ -377,7 +377,7 @@ cd frontend && npm run dev
 ### Backend
 
 ```bash
-python manage.py test                # all 157 tests (needs the database up)
+python manage.py test                # all 195 tests (needs the database up)
 python manage.py test attempts       # one app
 python manage.py makemigrations      # after changing a model
 python manage.py migrate
@@ -481,18 +481,91 @@ python scripts/devdb.py --fresh # recreate, migrate, seed
 
 ---
 
-## 11. Reserved — LLM feedback setup
+## 11. AI-drafted feedback
 
-> **This section is intentionally left blank.**
->
-> When LLM-generated feedback is implemented it will need its own setup steps:
-> which environment variables hold the provider credentials (in `.env`, alongside
-> the `POSTGRES_*` block, and gitignored the same way), any additional package in
-> `requirements.txt`, whether a worker process or queue has to run beside the three
-> in §8, and how to run the app locally with generation disabled so that no
-> development work incurs API cost.
->
-> _To be written._
+**Optional, and off by default.** Everything in the app works without any of
+this — teacher-written feedback is unaffected, the whole test suite passes, and
+nothing reaches the network. Skip this section entirely if you do not want it.
+
+No extra process. Nothing runs beside the three in §8: drafting is a request a
+teacher makes from the quiz builder, never a background worker and never anything
+that happens while a student is submitting.
+
+### 11.1 Getting a key
+
+1. Sign in at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and
+   create a key.
+2. Put it in `.env` — the same gitignored file as the `POSTGRES_*` block:
+
+```ini
+GOOGLE_AI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-2.5-flash
+AI_FEEDBACK_ENABLED=true
+```
+
+`env_example` carries all of these with blank values and comments.
+
+> ⚠️ Server-side only. Never prefix any of them with `NEXT_PUBLIC_` and never read
+> them from the browser — a `NEXT_PUBLIC_` variable is inlined into the client
+> bundle, which for an API key means publishing it. `frontend/.env.local` needs
+> nothing.
+
+### 11.2 Check your key's actual limits
+
+Open the rate-limits page in AI Studio and read the row for the model you set.
+The free tier is small enough to matter: at the time of writing, `gemini-2.5-flash`
+free allows **5 requests per minute and 20 per day**.
+
+Drafting makes **one call per question**, so 20 per day is one medium quiz — and a
+prompt-tuning session will exhaust it faster than that. Enabling billing on the
+key removes the constraint; the cost of a few hundred two-sentence explanations on
+Flash is a rounding error, and it changes no code.
+
+Set the pacer from what you actually read:
+
+```ini
+AI_FEEDBACK_RPM=5            # the quota. The pacer holds every run under it.
+AI_FEEDBACK_CONCURRENCY=2    # how many questions are in flight at once.
+```
+
+These are not the same knob. Concurrency is how many workers there are; RPM is the
+quota, enforced on the calls themselves, so raising concurrency alone can never
+breach it.
+
+### 11.3 Running without spending anything
+
+Three separate guarantees, in order of how much you have to remember:
+
+| | |
+| --- | --- |
+| **Tests** | Impossible to spend a token. `evalio/testrunner.py` forces the fake provider for the entire suite. |
+| **`--fake`** | `python manage.py draft_feedback --quiz N --fake` exercises the whole path — payload, validation, writes — with no API call. |
+| **`AI_FEEDBACK_ENABLED=false`** | The default. Endpoints answer 503 with a clear message; nothing else changes. |
+
+### 11.4 Tuning the prompt before you rely on it
+
+The wording in `feedback/prompts.py` is the only thing that decides whether the
+output is any good, and nothing downstream depends on it — no model field, no
+endpoint, no test. Read the output before building habits on it:
+
+```
+python manage.py draft_feedback --quiz N --limit 3    # 3 calls, writes nothing
+```
+
+`--limit` is there because a tuning run wants three explanations, not forty. The
+seeded data gives you both ends of the range on purpose: *Computer Hardware*
+carries a Year 5 instruction and *Mathematics 1* a secondary-level one, so you can
+see whether the topic prompt is actually changing the voice.
+
+Add `--write` when you are happy, or use the **Draft** button on the quiz builder.
+
+### 11.5 One thing worth knowing
+
+On Google's **free** tier, prompts and responses may be used to improve their
+products; paid tiers do not. No student data ever leaves — the payload is the
+topic name, quiz title, question and choices, and student identifiers are excluded
+by construction — but your question content does. Fine for a development project,
+worth knowing deliberately.
 
 ---
 

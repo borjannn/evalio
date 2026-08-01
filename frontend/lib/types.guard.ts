@@ -43,6 +43,24 @@ export type TeacherChoiceArrayIsNotAStudentChoiceArray = AssertFalse<
   Assignable<TeacherChoice[], StudentChoice[]>
 >;
 
+/* Each teacher-only member must reject the student shape on its own, so that
+   removing any single `?: never` is a build error rather than something the other
+   two quietly cover for. Without these, deleting `ai_feedback_text?: never` from
+   `StudentChoice` would still fail nothing — `is_correct` alone would keep the
+   assertion above red, and the leak would ship. ------------------------------- */
+
+export type AiFeedbackAloneBlocksTheStudentShape = AssertFalse<
+  Assignable<{ id: number; text: string; ai_feedback_text: string }, StudentChoice>
+>;
+
+export type TeacherFeedbackAloneBlocksTheStudentShape = AssertFalse<
+  Assignable<{ id: number; text: string; feedback_text: string }, StudentChoice>
+>;
+
+export type IsCorrectAloneBlocksTheStudentShape = AssertFalse<
+  Assignable<{ id: number; text: string; is_correct: boolean }, StudentChoice>
+>;
+
 /* ...but the genuine student shape must still be accepted, or the guard is
    useless: a type nothing satisfies would also "reject" the leak.  ------------- */
 

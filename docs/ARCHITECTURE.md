@@ -289,22 +289,119 @@ rebuilds the same passage the student originally received.
 
 ---
 
-## 9. Reserved — LLM-generated feedback
+## 9. AI-drafted feedback
 
-> **This section is intentionally left blank.**
->
-> Replacing or augmenting the hand-authored feedback passage with LLM-generated
-> feedback is the next major piece of work. This space is reserved for its
-> system-level design: where the model is called from, what data crosses that
-> boundary, how failure and latency are handled, and how the existing
-> deterministic path is preserved as a fallback.
->
-> For orientation, the seam is narrow and already isolated:
-> `feedback/services.py::generate_feedback` is the only function that produces a
-> `FeedbackResult`, and it is called from exactly one place —
-> `attempts/views.py::SubmitAttemptView`.
->
-> _To be written._
+Provider: **Google AI Studio (Gemini)**, behind a one-method interface.
+
+### 9.1 The shape, and why it is this shape
+
+The obvious design — call a model when a student submits — was rejected. The
+useful split is not "teacher versus AI" but **what the text depends on**:
+
+| Kind of text | Depends on | Reusable across students? |
+| --- | --- | --- |
+| "Why is *this choice* wrong for *this question*?" | Content only | **Yes**, forever |
+| "You got 3 of 10 — keep going" | This attempt | No |
+
+Per-choice explanations are content-level. They are identical for every student
+who ever picks that choice, so they can be written **before anyone sits the
+quiz**. That single observation removes almost every risk at once:
+
+- no student ever waits on an API call
+- no request can fail mid-submit
+- cost scales with **content authored**, not with traffic
+- the teacher reads the output before any student does
+
+**There is no runtime model call anywhere in this system.** Generation happens at
+authoring time, on a teacher's screen, and what a student receives is the same
+snapshotted text the deterministic path always used.
+
+### 9.2 What crosses the boundary
+
+Sent to Google, per question, one call each:
+
+| Included | Excluded |
+| --- | --- |
+| Topic name | **Every student identifier** — name, username, email, id |
+| Quiz title and description | Scores, attempts, anything per-attempt |
+| Question text | Any teacher-written `feedback_text` |
+| All choices, with which is correct | Other questions in the quiz |
+
+No student data reaches the provider, because none of it is relevant: the
+explanation is about the answer, not about the person. Teacher-written prose is
+excluded too, so the model never sees the teacher's voice anywhere in the
+feature — which is what makes "the AI did not rewrite my words" a structural fact
+rather than a promise.
+
+### 9.3 Where the seam is
+
+```
+quizzes/views.py  ──POST /suggest-feedback/, /generate-feedback/──┐
+                                                                  ▼
+                                              feedback/suggestions.py
+                                              (which choices, payload,
+                                               concurrency, validation,
+                                               writes ai_feedback_text)
+                                                        │
+                                            feedback/providers/gemini.py
+                                              (the only module that
+                                               talks to Google)
+```
+
+`feedback/providers/gemini.py` imports no Django models. It takes a prompt and a
+response schema and returns parsed JSON or raises. The provider is resolved by
+dotted path from settings, so the test runner substitutes a deterministic fake
+for the whole suite and no test can reach the network.
+
+`feedback/services.py::generate_feedback` remains **the only producer of a
+`FeedbackResult`**. The mode toggle adds a second *caller*, not a second producer.
+
+### 9.4 Two columns, two snapshots
+
+AI text is stored in `Choice.ai_feedback_text`, beside the teacher's
+`feedback_text` rather than in it. Both are snapshotted onto `AnswerResponse` at
+answer time.
+
+The second snapshot is what makes the mode toggle safe. `Quiz.feedback_mode` can
+be flipped after students have submitted, and rebuilding their feedback then
+picks a **different snapshot** rather than re-reading the live `Choice` — which
+would reintroduce the data-loss bug §8 exists to prevent. Both required
+behaviours then fall out with no special-casing:
+
+| Toggle | What happens | Why |
+| --- | --- | --- |
+| `ai` → `teacher` | Feedback changes to the written version | The `teacher` branch ignores the drafted snapshot |
+| `teacher` → `ai` | Those students keep what they had | Their drafted snapshot is **empty** — the text did not exist when they answered |
+
+The second needs no rule and no flag. It is true because a snapshot records the
+past.
+
+### 9.5 Failure, cost and refusal
+
+- **One call per question**, so a failure is per question and "retry only the
+  gaps" is possible. A whole-quiz call could not offer that, and would risk
+  truncation on a long quiz.
+- **A question is written whole or not at all.** A response is rejected unless
+  every requested choice appears exactly once, no unrequested one does, and
+  nothing is blank or over-long. Half a question explained is worse than none,
+  because the gap report would then call it finished.
+- **Each question is persisted as it completes**, so a run that times out keeps
+  what already succeeded and the readiness endpoint reports genuine progress.
+- **Publishing is blocked** in `ai` mode while any wrong choice is unexplained.
+  This is the strongest available guarantee that a student never meets an empty
+  explanation.
+- **Off by default.** `AI_FEEDBACK_ENABLED` defaults false; the endpoints answer
+  503 and nothing else in the app changes.
+
+### 9.6 What it deliberately does not do
+
+Per-attempt encouragement — *"six out of ten, keep going"* — is the one thing
+that genuinely cannot be pre-generated, and it is out of scope. Adding it means
+reintroducing a runtime call, and with it latency, a failure path at the most
+emotionally loaded moment in the app, and cost proportional to traffic. Two
+cheaper routes to most of the same warmth exist first: the per-choice
+explanations are already prompted to be encouraging, and a deterministic
+score-band opener beside `PERFECT_SCORE_TEXT` would need no model at all.
 
 ---
 

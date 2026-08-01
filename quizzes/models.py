@@ -6,6 +6,20 @@ class Topic(models.Model):
     """A topic/subject that contains quizzes and question banks."""
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    # Lives on the topic rather than the quiz because questions are shared across
+    # quizzes: a per-quiz prompt would make the right text for one choice depend on
+    # which quiz you reached it through, which a single column cannot hold. The
+    # cost is that a starter quiz and an end-of-unit quiz in one topic share a
+    # voice; the gain is that tone is consistent by construction.
+    feedback_prompt = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Optional tone and detail instructions for AI-drafted feedback in this "
+            "topic — e.g. 'Year 3 pupils, two short sentences, warm and concrete.' "
+            "Layered on top of the built-in template; it does not replace it."
+        ),
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="topics")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -72,15 +86,46 @@ class Choice(models.Model):
         help_text="Explanation shown to a student who picks this choice. Written by the teacher, "
                   "mainly to explain why an incorrect choice is wrong.",
     )
+    # Deliberately a second column rather than a value written into the one above.
+    # It keeps the teacher's version intact, makes the quiz's feedback_mode toggle
+    # reversible for free, and makes "the AI never touched my writing" verifiable
+    # rather than a promise.
+    #
+    # ⚠️ Exactly as sensitive as `feedback_text`, and absent from
+    # `ChoiceReadSerializer` for the same reason: only incorrect choices carry an
+    # explanation, so exposing it identifies the correct answer by elimination.
+    ai_feedback_text = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "AI-drafted explanation for this choice. Written only by the generation "
+            "service, only when `feedback_text` is blank, and never shown to a "
+            "student unless the quiz's feedback_mode is 'ai'."
+        ),
+    )
+    ai_generated_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.text} ({'correct' if self.is_correct else 'wrong'})"
 
 
 class Quiz(models.Model):
+    class FeedbackMode(models.TextChoices):
+        TEACHER = "teacher", "Teacher-written only"
+        AI = "ai", "AI-drafted, with teacher-written taking precedence"
+
     topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name="quizzes")
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    # Defaults to `teacher`, so every quiz that existed before this field kept its
+    # behaviour exactly and no data migration was needed. Switching to `ai` is
+    # retroactive for students who have already submitted — see
+    # `feedback/services.py::generate_feedback` and docs/BACKEND.md §7.
+    feedback_mode = models.CharField(
+        max_length=10,
+        choices=FeedbackMode.choices,
+        default=FeedbackMode.TEACHER,
+    )
     is_published = models.BooleanField(
         default=False,
         help_text="Controls whether assigned students can see and start this quiz. "

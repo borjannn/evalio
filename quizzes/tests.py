@@ -959,3 +959,218 @@ class QuizResultsTests(APITestCase):
         self.client.force_authenticate(self.finisher)
         response = self.client.get(f"/api/quizzes/{self.quiz.id}/results/")
         self.assertIn(response.status_code, (403, 404))
+
+
+class AIDraftingEndpointTests(APITestCase):
+    """The two drafting endpoints and the readiness report.
+
+    Ownership here is the same rule as everywhere else in this file: the queryset
+    filters before `get_object()`, so another teacher's row is a **404, not a 403**.
+    A 403 would confirm the row exists.
+    """
+
+    def setUp(self):
+        from .models import QuizQuestion
+
+        self.teacher = make_teacher()
+        self.other_teacher = make_teacher("other")
+        self.student = make_student()
+        self.topic = Topic.objects.create(name="Chemistry", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Bonds")
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Bonding", created_by=self.teacher
+        )
+        self.question = Question.objects.create(
+            question_bank=self.bank, text="Which bond?", created_by=self.teacher
+        )
+        self.correct = Choice.objects.create(
+            question=self.question, text="Covalent", is_correct=True
+        )
+        self.wrong = Choice.objects.create(
+            question=self.question, text="Ionic", is_correct=False
+        )
+        QuizQuestion.objects.create(quiz=self.quiz, question=self.question, order=0)
+
+    # --- suggest -----------------------------------------------------------
+
+    def test_suggest_returns_drafts_without_writing_them(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post(f"/api/questions/{self.question.id}/suggest-feedback/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["suggestions"]), 1)
+        self.assertEqual(response.data["suggestions"][0]["choice_id"], self.wrong.id)
+
+        self.wrong.refresh_from_db()
+        self.assertEqual(self.wrong.ai_feedback_text, "")
+        self.assertEqual(self.wrong.feedback_text, "")
+
+    def test_suggest_on_another_teachers_question_is_a_404(self):
+        self.client.force_authenticate(self.other_teacher)
+        response = self.client.post(f"/api/questions/{self.question.id}/suggest-feedback/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_student_cannot_suggest(self):
+        self.client.force_authenticate(self.student)
+        response = self.client.post(f"/api/questions/{self.question.id}/suggest-feedback/")
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_suggest_is_503_when_ai_is_switched_off(self):
+        """Off is the default everywhere. It has to fail legibly, not obscurely."""
+        self.client.force_authenticate(self.teacher)
+        with self.settings(AI_FEEDBACK_ENABLED=False):
+            response = self.client.post(f"/api/questions/{self.question.id}/suggest-feedback/")
+        self.assertEqual(response.status_code, 503)
+
+    # --- bulk generate -----------------------------------------------------
+
+    def test_generate_writes_ai_text_only(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post(f"/api/quizzes/{self.quiz.id}/generate-feedback/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["generated"], 1)
+        self.assertEqual(response.data["remaining_gaps"], 0)
+
+        self.wrong.refresh_from_db()
+        self.assertTrue(self.wrong.ai_feedback_text)
+        self.assertEqual(self.wrong.feedback_text, "")
+
+    def test_generate_on_another_teachers_quiz_is_a_404(self):
+        self.client.force_authenticate(self.other_teacher)
+        response = self.client.post(f"/api/quizzes/{self.quiz.id}/generate-feedback/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_generate_is_503_when_ai_is_switched_off(self):
+        self.client.force_authenticate(self.teacher)
+        with self.settings(AI_FEEDBACK_ENABLED=False):
+            response = self.client.post(f"/api/quizzes/{self.quiz.id}/generate-feedback/")
+        self.assertEqual(response.status_code, 503)
+
+    # --- readiness ---------------------------------------------------------
+
+    def test_readiness_reports_gaps_and_the_planned_call_count(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/feedback-readiness/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total_wrong_choices"], 1)
+        self.assertEqual(response.data["teacher_written"], 0)
+        self.assertEqual(response.data["ai_written"], 0)
+        self.assertFalse(response.data["can_publish_as_ai"])
+        self.assertEqual(response.data["planned_call_count"], 1)
+        self.assertEqual(response.data["gaps"][0]["choice_id"], self.wrong.id)
+
+    def test_readiness_counts_a_teacher_written_choice_as_covered(self):
+        self.wrong.feedback_text = "Because ionic bonds transfer electrons."
+        self.wrong.save()
+
+        self.client.force_authenticate(self.teacher)
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/feedback-readiness/")
+
+        self.assertEqual(response.data["teacher_written"], 1)
+        self.assertTrue(response.data["can_publish_as_ai"])
+        self.assertEqual(response.data["planned_call_count"], 0)
+
+    def test_readiness_on_another_teachers_quiz_is_a_404(self):
+        self.client.force_authenticate(self.other_teacher)
+        response = self.client.get(f"/api/quizzes/{self.quiz.id}/feedback-readiness/")
+        self.assertEqual(response.status_code, 404)
+
+
+class PublishGateTests(APITestCase):
+    """A quiz in `ai` mode may not go live while any wrong choice is unexplained.
+
+    This is the strongest guarantee available that a student never meets an empty
+    explanation, and it is why generation is retryable per question — filling the
+    gaps has to be something a teacher can actually finish.
+    """
+
+    def setUp(self):
+        from .models import QuizQuestion
+
+        self.teacher = make_teacher()
+        self.topic = Topic.objects.create(name="Biology", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Cells")
+        self.quiz = Quiz.objects.create(topic=self.topic, title="Cells", created_by=self.teacher)
+        self.question = Question.objects.create(
+            question_bank=self.bank, text="Which organelle?", created_by=self.teacher
+        )
+        Choice.objects.create(question=self.question, text="Mitochondrion", is_correct=True)
+        self.wrong = Choice.objects.create(
+            question=self.question, text="Ribosome", is_correct=False
+        )
+        QuizQuestion.objects.create(quiz=self.quiz, question=self.question, order=0)
+        self.client.force_authenticate(self.teacher)
+
+    def patch(self, **data):
+        return self.client.patch(f"/api/quizzes/{self.quiz.id}/", data, format="json")
+
+    def test_publishing_in_ai_mode_with_gaps_is_rejected(self):
+        response = self.patch(feedback_mode="ai", is_published=True)
+
+        self.assertEqual(response.status_code, 400)
+        # The count travels with the error; which choices they are comes from
+        # /feedback-readiness/, so there is one structured source rather than two.
+        # DRF wraps each field's error in a list and stringifies it, hence [0].
+        self.assertEqual(int(response.data["gap_count"][0]), 1)
+        self.assertIn("explanation yet", str(response.data["feedback_mode"][0]))
+        self.quiz.refresh_from_db()
+        self.assertFalse(self.quiz.is_published)
+
+    def test_switching_an_already_published_quiz_to_ai_with_gaps_is_rejected(self):
+        self.quiz.is_published = True
+        self.quiz.save()
+
+        response = self.patch(feedback_mode="ai")
+
+        self.assertEqual(response.status_code, 400)
+        self.quiz.refresh_from_db()
+        self.assertEqual(self.quiz.feedback_mode, "teacher")
+
+    def test_publishing_in_teacher_mode_with_gaps_is_allowed(self):
+        """Unchanged from before this feature existed — the student gets the fallback."""
+        response = self.patch(is_published=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.quiz.refresh_from_db()
+        self.assertTrue(self.quiz.is_published)
+
+    def test_publishing_in_ai_mode_is_allowed_once_every_gap_is_filled(self):
+        self.client.post(f"/api/quizzes/{self.quiz.id}/generate-feedback/")
+
+        response = self.patch(feedback_mode="ai", is_published=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.quiz.refresh_from_db()
+        self.assertTrue(self.quiz.is_published)
+        self.assertEqual(self.quiz.feedback_mode, "ai")
+
+    def test_a_teacher_written_explanation_also_closes_the_gap(self):
+        self.wrong.feedback_text = "Ribosomes build proteins rather than releasing energy."
+        self.wrong.save()
+
+        response = self.patch(feedback_mode="ai", is_published=True)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_ai_feedback_text_cannot_be_written_through_the_question_endpoint(self):
+        """Only the generation service may write it, or "drafted, not written" is unverifiable."""
+        response = self.client.patch(
+            f"/api/questions/{self.question.id}/",
+            {
+                "choices": [
+                    {
+                        "id": self.wrong.id,
+                        "text": "Ribosome",
+                        "is_correct": False,
+                        "ai_feedback_text": "Injected by the client.",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.wrong.refresh_from_db()
+        self.assertEqual(self.wrong.ai_feedback_text, "")

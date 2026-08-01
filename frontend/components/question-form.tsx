@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, Plus, X } from "lucide-react";
-import { useActionState, useState } from "react";
+import { AlertTriangle, Plus, Sparkles, X } from "lucide-react";
+import { useActionState, useState, useTransition } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Field, Input, Label, Textarea } from "@/components/ui/field";
 import {
   saveQuestion,
+  suggestFeedback,
   type QuestionFormState,
   type QuestionPayload,
 } from "@/lib/question-actions";
@@ -43,6 +44,14 @@ type Row = {
   id?: number;
   text: string;
   feedbackText: string;
+  /**
+   * True while this field holds text the teacher did not type. Cleared the moment
+   * they edit it, because at that point it is theirs.
+   *
+   * A teacher must never be unsure whether they wrote a sentence — that is the
+   * whole reason a draft is marked rather than silently inserted.
+   */
+  drafted?: boolean;
 };
 
 let rowCounter = 0;
@@ -100,6 +109,8 @@ export function QuestionForm({
     question ? Math.max(0, question.choices.findIndex((c) => c.is_correct)) : 0,
   );
   const [warningAccepted, setWarningAccepted] = useState(false);
+  const [suggesting, startSuggesting] = useTransition();
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   const [state, formAction, pending] = useActionState<QuestionFormState, QuestionPayload>(
     saveQuestion,
@@ -135,6 +146,44 @@ export function QuestionForm({
     setRows((current) =>
       current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     );
+  }
+
+  /**
+   * Draft explanations for every wrong choice at once.
+   *
+   * Only offered while editing: the endpoint is keyed by question id, and a
+   * question that has not been saved yet has none. Writing the question first is
+   * the natural order anyway — there is nothing to explain until the choices
+   * exist.
+   *
+   * Results are matched back by choice id, and a choice the teacher has already
+   * written into is left alone. The server would happily draft over it in the
+   * response (it drafts every wrong choice of the question), but discarding their
+   * prose because they pressed a convenience button is exactly the surprise this
+   * feature must not produce.
+   */
+  function suggest() {
+    if (!editing) return;
+    setSuggestError(null);
+    startSuggesting(async () => {
+      const result = await suggestFeedback(question.id);
+      if (result.error) {
+        setSuggestError(result.error);
+        return;
+      }
+      const byChoiceId = new Map(
+        (result.suggestions ?? []).map((s) => [s.choice_id, s.text]),
+      );
+      setRows((current) =>
+        current.map((row, index) => {
+          if (index === correctIndex) return row;
+          if (row.id === undefined) return row;
+          if (row.feedbackText.trim()) return row;
+          const drafted = byChoiceId.get(row.id);
+          return drafted ? { ...row, feedbackText: drafted, drafted: true } : row;
+        }),
+      );
+    });
   }
 
   function removeRow(index: number) {
@@ -267,6 +316,24 @@ export function QuestionForm({
               </span>
             </div>
 
+            {editing && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="secondary" onClick={suggest} disabled={suggesting}>
+                  <Sparkles size={16} />
+                  {suggesting ? "Drafting…" : "Suggest explanations"}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Fills empty explanations only. Nothing is saved until you save.
+                </span>
+              </div>
+            )}
+
+            {suggestError && (
+              <p role="alert" aria-live="polite" className="text-sm text-red-600">
+                {suggestError}
+              </p>
+            )}
+
             {rows.map((row, index) => {
               const isCorrect = index === correctIndex;
               return (
@@ -315,7 +382,12 @@ export function QuestionForm({
                   <Textarea
                     value={isCorrect ? "" : row.feedbackText}
                     onChange={(event) =>
-                      updateRow(index, { feedbackText: event.target.value })
+                      // Typing in a drafted field makes it the teacher's, so the
+                      // mark comes off in the same keystroke.
+                      updateRow(index, {
+                        feedbackText: event.target.value,
+                        drafted: false,
+                      })
                     }
                     disabled={isCorrect}
                     rows={2}
@@ -327,6 +399,14 @@ export function QuestionForm({
                     }
                     className={isCorrect ? "cursor-not-allowed bg-secondary" : undefined}
                   />
+
+                  {!isCorrect && row.drafted && (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Sparkles size={12} className="shrink-0" />
+                      Drafted for you. Edit it or leave it — it becomes yours when
+                      you save.
+                    </p>
+                  )}
                 </div>
               );
             })}

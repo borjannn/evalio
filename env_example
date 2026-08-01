@@ -3,3 +3,32 @@ POSTGRES_USER=evalio_user
 POSTGRES_PASSWORD=evalio_pass
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
+
+# --- AI-drafted feedback (optional) -------------------------------------------
+# Everything below is off by default. The app runs, tests pass and quizzes work
+# exactly as before without any of it — teacher-written feedback is unaffected.
+# See docs/SETUP.md §11.
+
+# From https://aistudio.google.com/apikey. Server-side only: never prefix any of
+# these with NEXT_PUBLIC_, and never read them from the browser.
+GOOGLE_AI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+
+# Leave false unless you have a key. With it off, the drafting endpoints answer
+# 503 and nothing else in the app changes.
+AI_FEEDBACK_ENABLED=false
+
+# Seconds.
+AI_FEEDBACK_TIMEOUT=30
+
+# Questions drafted at once, and the ceiling the pacer holds the run under.
+# Requests-per-minute is the constraint that bites first: check your key's actual
+# limits in AI Studio rather than trusting these numbers. The free tier is small
+# enough that one bulk run on a medium quiz can exhaust a day's quota.
+AI_FEEDBACK_CONCURRENCY=2
+AI_FEEDBACK_RPM=5
+
+# 0 turns off the model's thinking pass, which a two-sentence explanation does not
+# need. Model-dependent: 2.5 Flash and Flash Lite accept 0, the Pro models need -1
+# or at least 128.
+AI_FEEDBACK_THINKING_BUDGET=0

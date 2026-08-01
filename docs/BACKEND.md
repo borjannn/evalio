@@ -554,23 +554,140 @@ leaving acronyms and proper nouns alone.
 | `GET /api/feedback/mine/` | The requesting student's own feedback, newest first, paginated |
 | `GET /api/feedback/attempts/{attempt_id}/` | The attempt's student, **or** the teacher who created the quiz |
 
-### Reserved — LLM-generated feedback
+### AI-drafted feedback
 
-> **This section is intentionally left blank.**
->
-> The seam for LLM-generated feedback is here, and it is narrow on purpose:
-> `generate_feedback` is the only producer of a `FeedbackResult`, and
-> `SubmitAttemptView` is its only caller. Everything an LLM would need — the
-> question text, the chosen answer, the correct answer, and the teacher's own
-> explanation — is already snapshotted onto `AnswerResponse` at answer time, so no
-> new data model is required to read it.
->
-> Space reserved for: the provider integration, prompt construction, what is and is
-> not sent to the model, synchronous-versus-queued execution, failure and timeout
-> handling, cost controls, and how the existing deterministic passage is retained
-> as a fallback.
->
-> _To be written._
+Drafting runs at **authoring time only**. Nothing in this section executes while a
+student is taking or submitting a quiz. See ARCHITECTURE.md §9 for why.
+
+#### Modules
+
+```
+feedback/
+├── services.py      # generate_feedback — still the only producer of a FeedbackResult
+├── prompts.py       # the template, the payload, the response schema
+├── suggestions.py   # which choices need text, concurrency, validation, writes
+└── providers/
+    ├── base.py      # the Protocol, the errors, FakeProvider
+    └── gemini.py    # the only module that talks to Google
+```
+
+`providers/gemini.py` imports no models. `suggestions.py` is the only module that
+touches both the provider and the ORM.
+
+#### Fields
+
+| Model | Field | Notes |
+| --- | --- | --- |
+| `Topic` | `feedback_prompt` | Tone instructions, **layered onto** the built-in template, never replacing it. On the topic because questions are shared across quizzes. |
+| `Choice` | `ai_feedback_text` | Drafted explanation. Written only by the generation service, only when `feedback_text` is blank. |
+| `Choice` | `ai_generated_at` | Null until drafted. |
+| `Quiz` | `feedback_mode` | `teacher` (default) or `ai`. Existing quizzes were unaffected by the migration. |
+| `AnswerResponse` | `choice_ai_feedback_text` | Snapshot, written by `save()` beside its three siblings. |
+
+> ⚠️ **`ai_feedback_text` and `choice_ai_feedback_text` are exactly as sensitive as
+> `feedback_text` and `choice_feedback_text`.** Only incorrect choices ever carry
+> an explanation, so exposing either identifies the correct answer by elimination.
+> Both are absent from `ChoiceReadSerializer` and `AnswerResponseSerializer`, and
+> tests assert their absence. `ai_feedback_text` appears in
+> `ChoiceWriteSerializer` as **read-only** — the teacher's editor displays it, but
+> only the generation service may write it, or "this sentence was drafted, not
+> written" stops being verifiable.
+
+#### Endpoints
+
+| Method & path | Purpose | Permission |
+| --- | --- | --- |
+| `POST /api/questions/{id}/suggest-feedback/` | Draft one question's wrong choices. **Writes nothing.** | `IsTeacher`, `IsTopicOwner` |
+| `POST /api/quizzes/{id}/generate-feedback/` | Draft every **blank** wrong choice in the quiz | `IsTeacher`, `IsOwner` |
+| `GET /api/quizzes/{id}/feedback-readiness/` | Counts, the gap list, the planned call count | `IsTeacher`, `IsOwner` |
+| `PATCH /api/quizzes/{id}/` | Existing endpoint; now accepts `feedback_mode` | `IsTeacher`, `IsOwner` |
+
+Another teacher's row is a **404, not a 403**, the same as everywhere else — the
+queryset filters before `get_object()`.
+
+`suggest-feedback/` returns drafts without storing them, because the teacher is
+looking straight at the field. Accepting one is the ordinary
+`PATCH /api/questions/{id}/` nested write, which already diffs choices by id.
+There is no new write endpoint.
+
+```jsonc
+// POST /generate-feedback/ — partial success is normal and reported honestly
+{ "generated": 31, "skipped_teacher_written": 5,
+  "failed": [ { "question_id": 88, "reason": "…" } ], "remaining_gaps": 2 }
+```
+
+#### The publish gate
+
+`PATCH /api/quizzes/{id}/` is refused with **400** when the resulting state is
+`is_published=true` **and** `feedback_mode="ai"` **and** any wrong choice in the
+quiz has neither explanation. It catches both routes in: publishing a quiz
+already in `ai` mode, and switching a published quiz to `ai`.
+
+The error carries a message and `gap_count`. It deliberately does **not** repeat
+the gap list — DRF stringifies every value inside a `ValidationError`, so the ids
+would arrive as `"217"`, and `feedback-readiness/` already answers "which ones"
+in a properly typed shape. One structured source.
+
+`teacher` mode is unaffected: publishing with blanks stays allowed exactly as it
+always was, and a student who meets one gets `NO_EXPLANATIONS_TEXT`.
+
+#### The mode toggle
+
+`generate_feedback` gained one branch — in `ai` mode it reads
+`choice_feedback_text or choice_ai_feedback_text`, teacher first. The mode name is
+"AI-drafted, with teacher-written taking precedence", and that ordering is D6
+enforced at read time as well as at write time.
+
+Changing `feedback_mode` re-runs `generate_feedback` for every submitted attempt
+on that quiz, inside the same transaction as the save
+(`rebuild_feedback_for_quiz`). No API calls: both texts were snapshotted at answer
+time, so this is one cheap query per attempt, and `update_or_create` makes a retry
+harmless.
+
+#### Rules generation obeys
+
+1. **Never writes `feedback_text`.** `bulk_update` names its columns explicitly,
+   so no path in the module can write it even by accident.
+2. **Skips any choice the teacher has written** — and re-checks that inside the
+   write transaction, because a teacher can type an explanation while a
+   thirty-second run is in flight.
+3. **Never explains a correct choice.**
+4. **Writes a question whole or not at all.** A response is rejected unless every
+   requested choice id appears exactly once, no unrequested id appears, and every
+   text is non-blank and under `AI_FEEDBACK_MAX_LENGTH` (800).
+5. **Persists each question as it completes**, so a timeout keeps finished work
+   and `feedback-readiness/` reports real progress mid-run.
+6. **One automatic retry per question**, then the failure is reported. Re-running
+   regenerates only what is still blank, so the endpoint is its own retry.
+
+#### Rate limiting
+
+`AI_FEEDBACK_CONCURRENCY` and `AI_FEEDBACK_RPM` are different constraints and only
+one is a quota. Four workers against a 5 RPM key is a burst of 429s however small
+the pool is, so the ceiling is enforced on the calls themselves by a pacer in
+`suggestions.py::RateLimiter`. Raising concurrency alone can never breach the
+quota.
+
+#### Testing
+
+`EvalioTestRunner` (`evalio/testrunner.py`) forces `FakeProvider` and disables the
+pacer for the entire suite. **No test can reach the network**, and that is
+structural rather than a rule each test has to remember. The one test that needs
+drafting switched off overrides `AI_FEEDBACK_ENABLED` explicitly — the dangerous
+default is guarded, the safe one is opt-in.
+
+#### Tuning the prompt
+
+```
+python manage.py draft_feedback --quiz N --limit 3          # 3 calls, writes nothing
+python manage.py draft_feedback --quiz N --fake             # 0 calls, checks the plumbing
+python manage.py draft_feedback --quiz N --write            # fills the gaps for real
+```
+
+The wording in `feedback/prompts.py` is the only thing that decides whether this
+feature is any good, and nothing downstream depends on it. `--limit` exists
+because a free-tier key is metered per day and a tuning run wants three
+explanations, not forty.
 
 ---
 
@@ -668,7 +785,7 @@ queries — the invariant that matters is "doesn't grow", not an exact count.
 
 ## 10. Testing
 
-**157 tests across six apps.** Run the whole suite before finishing any backend
+**195 tests across six apps.** Run the whole suite before finishing any backend
 change.
 
 ```bash
@@ -679,10 +796,10 @@ python manage.py test attempts     # one app
 | App | Tests | Covers |
 | --- | ---: | --- |
 | `accounts` | 6 | Registration cannot grant the teacher role |
-| `quizzes` | 54 | Ownership isolation, choice diffing on edit, atomic reorder, both roles' annotations, `/results/`, the N+1 guard |
+| `quizzes` | 70 | Ownership isolation, choice diffing on edit, atomic reorder, both roles' annotations, `/results/`, the N+1 guard, the drafting endpoints and the publish gate |
 | `classes` | 35 | Assignment target constraints, assignment resolution, scoped student search, invite non-disclosure, audience ↔ visibility agreement |
-| `attempts` | 24 | Full lifecycle, resume-not-duplicate, correctness withheld, snapshots written, cross-student isolation, the teacher/student detail split |
-| `feedback` | 10 | Ordering, unanswered questions, blank explanations, fallbacks, idempotent re-submission, immunity to later edits |
+| `attempts` | 27 | Full lifecycle, resume-not-duplicate, correctness withheld, snapshots written, cross-student isolation, the teacher/student detail split |
+| `feedback` | 39 | Ordering, unanswered questions, blank explanations, fallbacks, idempotent re-submission, immunity to later edits, and the whole drafting layer: what generation refuses to write, both toggle directions, the rate pacer |
 | `analytics` | 28 | Each grouping, both metrics, filter validation, ownership scoping |
 
 > If a test asserts a **404 where you expect 403**, or asserts a field is

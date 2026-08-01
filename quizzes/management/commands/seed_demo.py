@@ -255,6 +255,14 @@ class Command(BaseCommand):
         hardware_topic = Topic.objects.create(
             name="Computer Hardware",
             description="Input, output and storage devices for the year 5 syllabus.",
+            # Deliberately a young-audience instruction, and the maths topic below
+            # is deliberately an advanced one. Tuning the prompt template means
+            # reading its output at both ends of that range — see
+            # `manage.py draft_feedback`.
+            feedback_prompt=(
+                "Year 5 pupils, around ten years old. Two short sentences, warm and "
+                "concrete, and use an everyday example where one fits."
+            ),
             created_by=maria,
         )
         # Mirrors TopicViewSet.perform_create, which always makes a default bank.
@@ -295,6 +303,10 @@ class Command(BaseCommand):
         maths_topic = Topic.objects.create(
             name="Mathematics 1",
             description="Fractions and basic arithmetic.",
+            feedback_prompt=(
+                "Secondary pupils. Name the misconception precisely and use correct "
+                "mathematical vocabulary; do not simplify the terminology."
+            ),
             created_by=james,
         )
         QuestionBank.objects.create(topic=maths_topic, name=QuestionBank.DEFAULT_NAME)

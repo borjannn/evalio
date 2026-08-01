@@ -13,6 +13,7 @@ import { Field, Input, Textarea } from "@/components/ui/field";
 import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/cn";
 import type {
+  FeedbackReadiness,
   QuestionBank,
   QuizBuilderQuestion,
   QuizDetailTeacher,
@@ -28,6 +29,7 @@ import {
   type QuizEditState,
 } from "./actions";
 import { BankPicker } from "./bank-picker";
+import { FeedbackPanel } from "./feedback-panel";
 import { QuestionList } from "./question-list";
 import { QuestionRow } from "./question-row";
 
@@ -49,12 +51,14 @@ export function QuizBuilder({
   banks,
   pickable,
   pickableTotal,
+  readiness,
 }: {
   quiz: QuizDetailTeacher;
   banks: QuestionBank[];
   /** The bank picker's unfiltered first page — see the page's docblock. */
   pickable: TeacherQuestionWithUsage[];
   pickableTotal: number;
+  readiness: FeedbackReadiness;
 }) {
   const [editingDetails, setEditingDetails] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>(null);
@@ -102,6 +106,13 @@ export function QuizBuilder({
     setSeenDetails(detailsState);
     if (detailsState.ok) setEditingDetails(false);
   }
+
+  // Publishing can be refused by the feedback gate, so it needs a state to report
+  // rather than a bare `action={setPublished}`.
+  const [publishState, publishAction, publishPending] = useActionState<
+    QuizEditState,
+    FormData
+  >(setPublished, { error: null });
 
   /** Move one question and persist the whole sequence in a single atomic call. */
   function commitOrder(next: QuizBuilderQuestion[]) {
@@ -211,6 +222,15 @@ export function QuizBuilder({
                 {quiz.description && (
                   <p className="max-w-2xl text-muted-foreground">{quiz.description}</p>
                 )}
+                {publishState.error && (
+                  <p
+                    role="alert"
+                    aria-live="polite"
+                    className="max-w-2xl text-sm text-red-600"
+                  >
+                    {publishState.error}
+                  </p>
+                )}
               </div>
 
               <div className="flex shrink-0 flex-wrap items-center gap-3">
@@ -234,11 +254,18 @@ export function QuizBuilder({
                   </Link>
                 </div>
                 {/* Publishing is a soft flag — a published quiz stays editable and
-                    un-publishing keeps existing attempts — so it needs no confirm. */}
-                <form action={setPublished}>
+                    un-publishing keeps existing attempts — so it needs no confirm.
+                    It can now be *refused*, though: a quiz set to draft its
+                    feedback with AI may not go live while a wrong choice is
+                    unexplained, so the error has somewhere to land. */}
+                <form action={publishAction}>
                   <input type="hidden" name="id" value={quiz.id} />
                   <input type="hidden" name="published" value={String(!quiz.is_published)} />
-                  <Button type="submit" variant={quiz.is_published ? "secondary" : "primary"}>
+                  <Button
+                    type="submit"
+                    variant={quiz.is_published ? "secondary" : "primary"}
+                    disabled={publishPending}
+                  >
                     {quiz.is_published ? "Unpublish" : "Publish"}
                   </Button>
                 </form>
@@ -277,6 +304,15 @@ export function QuizBuilder({
           </CardFooter>
         </Card>
       )}
+
+      {/* Between identity and content: the feedback settings are a property of
+          the whole quiz, like publishing, but they are consulted while writing
+          questions rather than at the end. */}
+      <FeedbackPanel
+        quizId={quiz.id}
+        initial={readiness}
+        isPublished={quiz.is_published}
+      />
 
       <Section
         title="Questions"

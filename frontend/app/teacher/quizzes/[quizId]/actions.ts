@@ -5,7 +5,14 @@ import { redirect } from "next/navigation";
 
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
-import type { Paginated, Quiz, TeacherQuestionWithUsage } from "@/lib/types";
+import type {
+  BulkGenerationResult,
+  FeedbackMode,
+  FeedbackReadiness,
+  Paginated,
+  Quiz,
+  TeacherQuestionWithUsage,
+} from "@/lib/types";
 
 /**
  * Quiz builder mutations — docs/FRONTEND.md §8.
@@ -50,16 +57,106 @@ export async function updateQuizDetails(
  * attempts and their feedback intact — so this needs no confirmation and no
  * one-way door, and the UI shouldn't imply either.
  */
-export async function setPublished(formData: FormData): Promise<void> {
+export async function setPublished(
+  _previous: QuizEditState,
+  formData: FormData,
+): Promise<QuizEditState> {
   await requireTeacher();
 
   const id = Number(formData.get("id"));
   const published = formData.get("published") === "true";
-  if (!Number.isInteger(id)) return;
+  if (!Number.isInteger(id)) return { error: null };
 
-  await apiPatch<Quiz>(`/quizzes/${id}/`, { is_published: published });
+  try {
+    await apiPatch<Quiz>(`/quizzes/${id}/`, { is_published: published });
+  } catch (error) {
+    // Publishing can now be *refused*: a quiz in AI mode with an unexplained
+    // wrong choice is a 400. Returning the message rather than throwing keeps the
+    // teacher on the builder, where the gap list they need is already on screen.
+    if (error instanceof ApiError && error.status === 400) {
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+
   revalidatePath(`/teacher/quizzes/${id}`);
   revalidatePath("/teacher");
+  return { error: null, ok: true };
+}
+
+/**
+ * Switch which explanation submitted students are shown — docs/FRONTEND.md §10.
+ *
+ * ⚠️ Retroactive, and the UI has to say so. Django re-runs `generate_feedback`
+ * for every submitted attempt on the quiz inside the same transaction; that costs
+ * no API calls, because both explanations were snapshotted onto the answers at
+ * answer time and the mode only decides which snapshot is read.
+ */
+export async function setFeedbackMode(
+  quizId: number,
+  mode: FeedbackMode,
+): Promise<{ error: string | null }> {
+  await requireTeacher();
+
+  try {
+    await apiPatch<Quiz>(`/quizzes/${quizId}/`, { feedback_mode: mode });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+
+  revalidatePath(`/teacher/quizzes/${quizId}`);
+  return { error: null };
+}
+
+/**
+ * Draft every blank wrong choice in the quiz.
+ *
+ * Partial success is normal and is reported as such — one question failing out of
+ * thirty must not discard the twenty-nine that worked. Re-running fills only what
+ * is still blank, so the retry is the same call.
+ *
+ * This can take a minute on a large quiz. It is a plain request rather than a
+ * background job because the teacher is waiting on the result and the work is
+ * bounded; if quizzes ever get big enough that this stops being true, the fix is
+ * a job queue, not a longer timeout.
+ */
+export async function generateQuizFeedback(
+  quizId: number,
+): Promise<{ result?: BulkGenerationResult; error?: string }> {
+  await requireTeacher();
+
+  try {
+    const result = await apiPost<BulkGenerationResult>(
+      `/quizzes/${quizId}/generate-feedback/`,
+      {},
+    );
+    revalidatePath(`/teacher/quizzes/${quizId}`);
+    return { result };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 503) {
+        return { error: "AI drafting is switched off on the server." };
+      }
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Re-read the readiness counts.
+ *
+ * Polled while a bulk run is in flight, which is what makes the progress readout
+ * honest: generation persists each question as it completes, so a falling gap
+ * count is a real measurement of work done rather than an animation timed to look
+ * plausible. Costs one query, no API calls.
+ */
+export async function loadFeedbackReadiness(quizId: number): Promise<FeedbackReadiness> {
+  await requireTeacher();
+  return apiGet<FeedbackReadiness>(`/quizzes/${quizId}/feedback-readiness/`);
 }
 
 export async function deleteQuiz(formData: FormData): Promise<void> {

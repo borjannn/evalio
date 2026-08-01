@@ -323,3 +323,55 @@ class TeacherAttemptDetailTests(AttemptLifecycleTestCase):
         answer = self.client.get(f"/api/attempts/{self.attempt.id}/").data["answers"][0]
         self.assertEqual(answer["choice_text"], "Wrong")
         self.assertEqual(answer["choice_feedback_text"], "Because no.")
+
+
+class AIFeedbackSnapshotTests(AttemptLifecycleTestCase):
+    """`choice_ai_feedback_text` is a snapshot with the same exposure rule as its siblings.
+
+    Both explanations are snapshotted rather than one, because a quiz's
+    `feedback_mode` can be toggled after students have submitted and rebuilding
+    their feedback must pick a different *snapshot* rather than re-read the live
+    `Choice`. See feedback/tests.py::FeedbackModeTests.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.wrong.ai_feedback_text = "Drafted explanation."
+        self.wrong.save()
+        self.assign()
+
+    def answer(self):
+        self.client.force_authenticate(self.student)
+        attempt_id = self.client.post(
+            "/api/attempts/start/", {"quiz_id": self.quiz.id}, format="json"
+        ).data["id"]
+        self.client.post(
+            f"/api/attempts/{attempt_id}/answer/",
+            {"question_id": self.question.id, "choice_id": self.wrong.id},
+            format="json",
+        )
+        return attempt_id
+
+    def test_the_drafted_text_is_snapshotted_at_answer_time(self):
+        attempt_id = self.answer()
+
+        answer = AnswerResponse.objects.get(attempt_id=attempt_id)
+        self.assertEqual(answer.choice_ai_feedback_text, "Drafted explanation.")
+        self.assertEqual(answer.choice_feedback_text, "Because no.")
+
+    def test_a_student_never_sees_the_drafted_snapshot(self):
+        """Same leak as `choice_feedback_text` — only wrong choices carry one."""
+        attempt_id = self.answer()
+
+        response = self.client.get(f"/api/attempts/{attempt_id}/")
+
+        self.assertNotIn("choice_ai_feedback_text", response.data["answers"][0])
+
+    def test_an_answer_given_before_drafting_keeps_an_empty_snapshot(self):
+        """Which is what makes switching a quiz to `ai` mode leave earlier students alone."""
+        Choice.objects.filter(pk=self.wrong.pk).update(ai_feedback_text="")
+        attempt_id = self.answer()
+        Choice.objects.filter(pk=self.wrong.pk).update(ai_feedback_text="Drafted later.")
+
+        answer = AnswerResponse.objects.get(attempt_id=attempt_id)
+        self.assertEqual(answer.choice_ai_feedback_text, "")

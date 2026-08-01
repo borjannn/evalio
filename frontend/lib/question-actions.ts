@@ -147,6 +147,46 @@ export async function saveQuestion(
   return { error: null, ok: true };
 }
 
+/**
+ * The Suggest button — `POST /api/questions/{id}/suggest-feedback/`.
+ *
+ * Returns drafts and stores nothing. The teacher is looking straight at the field
+ * when they press it, so the draft goes into the form for them to edit or discard;
+ * accepting it is just the ordinary save, which already writes `feedback_text`.
+ *
+ * Errors are returned rather than thrown. A failed suggestion is a routine
+ * disappointment on an optional convenience, not a broken screen — throwing would
+ * put the whole question form into an error boundary and lose the teacher's
+ * unsaved work.
+ */
+export type SuggestionState = {
+  suggestions?: { choice_id: number; text: string }[];
+  error?: string;
+};
+
+export async function suggestFeedback(questionId: number): Promise<SuggestionState> {
+  await requireTeacher();
+
+  try {
+    const data = await apiPost<{ suggestions: { choice_id: number; text: string }[] }>(
+      `/questions/${questionId}/suggest-feedback/`,
+      {},
+    );
+    return { suggestions: data.suggestions };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 503) {
+        return { error: "AI drafting is switched off on the server." };
+      }
+      if (error.status === 502) {
+        return { error: "The model couldn't draft this one. Try again." };
+      }
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+}
+
 export async function deleteQuestion(formData: FormData): Promise<void> {
   await requireTeacher();
 

@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.db import transaction
 from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery
 from django.db.models.functions import Coalesce
 from rest_framework import filters, status, viewsets
@@ -258,6 +260,49 @@ class QuestionViewSet(viewsets.ModelViewSet):
             self.permission_denied(self.request, message="You do not own this question bank.")
         serializer.save(created_by=self.request.user)
 
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="suggest-feedback",
+        permission_classes=[IsTeacher, IsTopicOwner],
+    )
+    def suggest_feedback(self, request, pk=None):
+        """POST /api/questions/{id}/suggest-feedback/ — draft this question's wrong choices.
+
+        Returns drafts **without writing them**. The teacher is looking straight at
+        the field when they press Suggest, so the draft belongs in their hands to
+        accept or discard; a round trip through storage would add a state to manage
+        for no benefit. Accepting one is the ordinary `PATCH /api/questions/{id}/`
+        nested write, which already diffs choices by id — no new write endpoint.
+
+        `get_object()` runs against the ownership-filtered queryset, so another
+        teacher's question is a 404 here exactly as it is everywhere else.
+        """
+        from feedback.providers import ProviderUnavailable
+        from feedback.suggestions import suggest_for_question
+
+        question = self.get_object()
+        try:
+            draft = suggest_for_question(question)
+        except ProviderUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        if not draft.ok:
+            # 502: the request was fine, the upstream model was not.
+            return Response(
+                {"detail": "Could not draft feedback for this question.", "reason": draft.error},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                "suggestions": [
+                    {"choice_id": choice_id, "text": text}
+                    for choice_id, text in draft.suggestions.items()
+                ]
+            }
+        )
+
 
 class QuizViewSet(viewsets.ModelViewSet):
     queryset = Quiz.objects.all()
@@ -337,6 +382,101 @@ class QuizViewSet(viewsets.ModelViewSet):
         if topic.created_by_id != self.request.user.id:
             self.permission_denied(self.request, message="You do not own this topic.")
         serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        """Save, and rebuild submitted feedback if the feedback mode changed.
+
+        The mode is retroactive — see `feedback/services.py::rebuild_feedback_for_quiz`.
+        Both texts were snapshotted onto the answers at answer time, so this costs
+        one small query per submitted attempt and no API calls at all.
+
+        Wrapped in a transaction with the save so a quiz can never end up in `ai`
+        mode while its students' feedback still reads from the teacher's text.
+        `update_or_create` inside `generate_feedback` makes a retry harmless.
+        """
+        from feedback.services import rebuild_feedback_for_quiz
+
+        previous_mode = serializer.instance.feedback_mode
+        with transaction.atomic():
+            quiz = serializer.save()
+            if quiz.feedback_mode != previous_mode:
+                rebuild_feedback_for_quiz(quiz)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="generate-feedback",
+        permission_classes=[IsTeacher, IsOwner],
+    )
+    def generate_feedback(self, request, pk=None):
+        """POST /api/quizzes/{id}/generate-feedback/ — draft every blank wrong choice.
+
+        Writes `ai_feedback_text` directly, because bulk output is reviewed in place
+        rather than field by field. It never touches `feedback_text`, and skips any
+        choice that already has one.
+
+        Partial success is normal and is reported honestly rather than being
+        flattened into an error: one question failing out of thirty should not
+        discard the twenty-nine that worked, and re-running regenerates only what is
+        still blank, so the response doubles as the retry instruction.
+        """
+        from feedback.providers import ProviderUnavailable
+        from feedback.suggestions import generate_for_quiz
+
+        quiz = self.get_object()
+        try:
+            result = generate_for_quiz(quiz)
+        except ProviderUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        return Response(
+            {
+                "generated": result.generated,
+                "skipped_teacher_written": result.skipped_teacher_written,
+                "failed": result.failures,
+                "remaining_gaps": result.remaining_gaps,
+            }
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="feedback-readiness",
+        permission_classes=[IsTeacher, IsOwner],
+    )
+    def feedback_readiness(self, request, pk=None):
+        """GET /api/quizzes/{id}/feedback-readiness/ — what is written and what is missing.
+
+        Powers the builder's "29 drafted · 5 yours · 2 gaps" summary, the publish
+        gate's explanation, and the "this will make N calls" warning shown before a
+        bulk run starts.
+
+        `can_publish_as_ai` is computed here rather than left to the client so the
+        button's enabled state and the serializer's validation cannot disagree —
+        both come from `gaps_for_quiz`.
+        """
+        from feedback.suggestions import gaps_for_quiz, planned_call_count, readiness_for_quiz
+
+        quiz = self.get_object()
+        gaps = gaps_for_quiz(quiz)
+        return Response(
+            {
+                "mode": quiz.feedback_mode,
+                **readiness_for_quiz(quiz),
+                "gaps": [
+                    {
+                        "question_id": question.id,
+                        "question_text": question.text,
+                        "choice_id": choice.id,
+                        "choice_text": choice.text,
+                    }
+                    for question, choice in gaps
+                ],
+                "can_publish_as_ai": not gaps,
+                "planned_call_count": planned_call_count(quiz),
+                "ai_enabled": settings.AI_FEEDBACK_ENABLED,
+            }
+        )
 
     @action(detail=True, methods=["post"], permission_classes=[IsTeacher, IsOwner])
     def add_question(self, request, pk=None):

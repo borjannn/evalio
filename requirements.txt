@@ -5,5 +5,9 @@ django-cors-headers
 python-dotenv
 psycopg[binary]
 
+# AI-drafted feedback. Imported only inside feedback/providers/gemini.py, and only
+# when AI_FEEDBACK_ENABLED is on — the app runs without ever loading it.
+google-genai>=2.16.0
+
 # dev
 ruff

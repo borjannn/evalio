@@ -46,6 +46,18 @@ class AnswerResponse(models.Model):
                   "serialized to a student — it reaches them only inside the assembled "
                   "FeedbackResult after they submit.",
     )
+    # Snapshotted for the same reason as its sibling, and *both* are needed rather
+    # than one: `feedback_mode` can be toggled after students have submitted, and
+    # rebuilding their feedback has to pick a different snapshot rather than re-read
+    # the live Choice. It also makes the retroactive behaviour fall out for free —
+    # a student who answered before any AI text existed has an empty value here, so
+    # switching the quiz to `ai` leaves their feedback alone without needing a rule.
+    choice_ai_feedback_text = models.TextField(
+        blank=True,
+        default="",
+        help_text="Snapshot of the chosen choice's AI-drafted explanation. Same exposure "
+                  "rule as choice_feedback_text — never serialized to a student.",
+    )
 
     is_correct = models.BooleanField(default=False)
     answered_at = models.DateTimeField(auto_now_add=True)
@@ -63,6 +75,7 @@ class AnswerResponse(models.Model):
             self.is_correct = self.selected_choice.is_correct
             self.choice_text = self.selected_choice.text
             self.choice_feedback_text = self.selected_choice.feedback_text
+            self.choice_ai_feedback_text = self.selected_choice.ai_feedback_text
         if self.question_id and not self.question_text:
             self.question_text = self.question.text
         super().save(*args, **kwargs)

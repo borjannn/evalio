@@ -59,6 +59,26 @@ export function EditTopic({ topic }: { topic: Topic }) {
         />
       </Field>
 
+      {/* On the topic rather than the quiz because questions are shared across
+          quizzes — a per-quiz instruction would make the right wording for one
+          choice depend on which quiz you reached it through. The hint says
+          "added to" rather than "used as" on purpose: this text is layered onto
+          a built-in template that owns the format, so it can be short and can't
+          break anything. */}
+      <Field
+        htmlFor="topic-feedback-prompt"
+        label="AI drafting instructions"
+        hint="Optional. Sets the voice for AI-drafted explanations across every quiz in this topic. Added to the built-in instructions rather than replacing them."
+      >
+        <Textarea
+          id="topic-feedback-prompt"
+          name="feedback_prompt"
+          defaultValue={topic.feedback_prompt}
+          rows={3}
+          placeholder="e.g. Year 3 pupils, two short sentences, warm and concrete."
+        />
+      </Field>
+
       {state.error && (
         <p role="alert" aria-live="polite" className="text-sm text-red-600">
           {state.error}

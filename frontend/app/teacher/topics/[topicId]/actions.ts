@@ -58,11 +58,16 @@ export async function updateTopic(
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const feedbackPrompt = String(formData.get("feedback_prompt") ?? "").trim();
 
   if (!name) return { error: "A topic needs a name." };
 
   try {
-    await apiPatch<Topic>(`/topics/${id}/`, { name, description });
+    await apiPatch<Topic>(`/topics/${id}/`, {
+      name,
+      description,
+      feedback_prompt: feedbackPrompt,
+    });
   } catch (error) {
     if (error instanceof ApiError && error.status === 400) {
       return { error: error.formMessage };

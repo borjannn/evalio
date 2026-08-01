@@ -79,6 +79,12 @@ export type StudentChoice = {
   text: string;
   is_correct?: never;
   feedback_text?: never;
+  /**
+   * The AI-drafted explanation is exactly as sensitive as the teacher's own —
+   * same field, same leak, different author. Only incorrect choices ever carry
+   * one, so exposing it identifies the correct answer by elimination.
+   */
+  ai_feedback_text?: never;
 };
 
 /**
@@ -88,12 +94,20 @@ export type StudentChoice = {
  * practice only incorrect choices carry one. Exposing it identifies the correct
  * answer by elimination. It reaches a student only inside an assembled
  * `FeedbackResult`, after submission.
+ *
+ * `ai_feedback_text` is **read-only from the API's point of view**: the editor
+ * shows it and marks the field as drafted, but only the generation service may
+ * write it. Sending it in a PATCH is ignored server-side, which is what keeps
+ * "this sentence was drafted, not written" verifiable rather than assumed.
  */
 export type TeacherChoice = {
   id: number;
   text: string;
   is_correct: boolean;
   feedback_text: string;
+  ai_feedback_text: string;
+  /** Null until something drafts this choice. */
+  ai_generated_at: string | null;
 };
 
 /** `QuestionStudentSerializer`. Carries no bank, author, or timestamps. */
@@ -146,6 +160,13 @@ export type Topic = {
   name: string;
   /** `blank=True`, never null. Empty string when unset. */
   description: string;
+  /**
+   * Tone and detail instructions layered onto the built-in drafting template —
+   * never a replacement for it, so one bad edit cannot break the output format.
+   * Lives on the topic rather than the quiz because questions are shared across
+   * quizzes. `blank=True`; empty means "use the template alone".
+   */
+  feedback_prompt: string;
   quiz_count: number;
   question_bank_count: number;
   /**
@@ -201,6 +222,14 @@ export type QuestionBankDetail = {
   updated_at: string;
 };
 
+/**
+ * Which explanation a submitted student is shown. `quizzes.Quiz.FeedbackMode`.
+ *
+ * `"ai"` does not mean "instead of the teacher" — teacher-written text still
+ * takes precedence wherever it exists, and the drafted text is the fallback.
+ */
+export type FeedbackMode = "teacher" | "ai";
+
 /** `QuizSerializer` — list shape. */
 export type Quiz = {
   id: number;
@@ -208,8 +237,49 @@ export type Quiz = {
   title: string;
   description: string;
   is_published: boolean;
+  /**
+   * Changing this is **retroactive** for students who have already submitted,
+   * because both explanations are snapshotted onto their answers and the mode
+   * only decides which snapshot is read. Switching to `"ai"` leaves earlier
+   * attempts alone (their drafted snapshot is empty — the text did not exist when
+   * they answered); switching back to `"teacher"` rewrites them.
+   */
+  feedback_mode: FeedbackMode;
   created_by: number;
   created_at: string;
+};
+
+/**
+ * `GET /api/quizzes/{id}/feedback-readiness/` — what is written, what is missing.
+ *
+ * The single structured source for which choices lack an explanation. The publish
+ * gate's 400 carries only a count, deliberately, so there is one place that
+ * answers "which ones".
+ */
+export type FeedbackReadiness = {
+  mode: FeedbackMode;
+  total_wrong_choices: number;
+  teacher_written: number;
+  ai_written: number;
+  gaps: {
+    question_id: number;
+    question_text: string;
+    choice_id: number;
+    choice_text: string;
+  }[];
+  can_publish_as_ai: boolean;
+  /** One API call per question with a gap — shown before a run starts. */
+  planned_call_count: number;
+  /** False when the server has AI drafting switched off; the endpoints 503. */
+  ai_enabled: boolean;
+};
+
+/** `POST /api/quizzes/{id}/generate-feedback/`. Partial success is normal. */
+export type BulkGenerationResult = {
+  generated: number;
+  skipped_teacher_written: number;
+  failed: { question_id: number; reason: string }[];
+  remaining_gaps: number;
 };
 
 /**

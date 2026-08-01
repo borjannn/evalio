@@ -10,13 +10,24 @@ class ChoiceWriteSerializer(serializers.ModelSerializer):
     `id` is declared explicitly because `ModelSerializer` makes it read-only by
     default, and `QuestionTeacherSerializer.update` needs the incoming id to tell
     an edited choice from a new one.
+
+    `ai_feedback_text` is **read-only** here. The teacher's editor reads it to show
+    what was drafted and to mark the field as AI-written, but the only thing that
+    may write it is the generation service — a client PATCH that could set it would
+    make "this sentence was drafted, not written" unverifiable. `feedback_text`
+    stays writable: accepting a suggestion is a normal edit of the teacher's own
+    field.
     """
 
     id = serializers.IntegerField(required=False)
 
     class Meta:
         model = Choice
-        fields = ("id", "text", "is_correct", "feedback_text")
+        fields = (
+            "id", "text", "is_correct", "feedback_text",
+            "ai_feedback_text", "ai_generated_at",
+        )
+        read_only_fields = ("ai_feedback_text", "ai_generated_at")
 
 
 class ChoiceReadSerializer(serializers.ModelSerializer):
@@ -26,6 +37,9 @@ class ChoiceReadSerializer(serializers.ModelSerializer):
     `feedback_text` is hidden too, and must stay that way. In practice only incorrect
     choices carry an explanation, so exposing the field would let a student identify
     the correct answer by looking for the empty one.
+
+    ⚠️ `ai_feedback_text` is hidden for exactly the same reason and is not an
+    exception to it. Same field, same leak, different author.
     """
 
     class Meta:
@@ -127,8 +141,64 @@ class QuestionStudentSerializer(serializers.ModelSerializer):
 class QuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
-        fields = ("id", "topic", "title", "description", "is_published", "created_by", "created_at")
+        fields = (
+            "id", "topic", "title", "description", "is_published", "feedback_mode",
+            "created_by", "created_at",
+        )
         read_only_fields = ("created_by", "created_at")
+
+    def validate(self, attrs):
+        """The publish gate: a quiz in `ai` mode may not go live with gaps.
+
+        This is the strongest available guarantee that a student never meets an
+        empty explanation, and it is why generation is retryable per question
+        rather than per quiz — filling the gaps has to be something a teacher can
+        finish.
+
+        It checks the **resulting** state, not the incoming fields, so it catches
+        both ways in: publishing a quiz that is already in `ai` mode, and switching
+        an already-published quiz to `ai`. A PATCH that touches neither field still
+        passes through here, which is deliberate — a quiz cannot become invalid by
+        having its title edited, and re-checking costs one prefetch.
+
+        Deliberately does **not** apply in `teacher` mode. Publishing with blanks
+        stays allowed exactly as it always was, and a student who meets one gets
+        the existing `NO_EXPLANATIONS_TEXT` fallback.
+        """
+        attrs = super().validate(attrs)
+        instance = self.instance
+
+        is_published = attrs.get(
+            "is_published", instance.is_published if instance else False
+        )
+        mode = attrs.get(
+            "feedback_mode", instance.feedback_mode if instance else Quiz.FeedbackMode.TEACHER
+        )
+
+        if not (is_published and mode == Quiz.FeedbackMode.AI and instance is not None):
+            return attrs
+
+        from feedback.suggestions import gaps_for_quiz
+
+        gaps = gaps_for_quiz(instance)
+        if gaps:
+            # The message carries the count; the linkable list of *which* choices
+            # lives on `/feedback-readiness/`. Two reasons not to repeat it here:
+            # DRF coerces every value inside a ValidationError to a string, so the
+            # ids would arrive as `"217"`, and the builder screen has already
+            # fetched readiness to draw its gap badge. One structured source.
+            raise serializers.ValidationError(
+                {
+                    "feedback_mode": (
+                        f"{len(gaps)} wrong "
+                        f"{'choice has' if len(gaps) == 1 else 'choices have'} no "
+                        "explanation yet. Draft the missing feedback, or switch this "
+                        "quiz back to teacher-written mode, before publishing."
+                    ),
+                    "gap_count": len(gaps),
+                }
+            )
+        return attrs
 
 
 class QuizTeacherListSerializer(QuizSerializer):
@@ -220,7 +290,7 @@ class QuizDetailTeacherSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
         fields = (
-            "id", "topic", "title", "description", "is_published",
+            "id", "topic", "title", "description", "is_published", "feedback_mode",
             "questions", "created_by", "created_at",
         )
         read_only_fields = ("created_by", "created_at")
@@ -320,7 +390,8 @@ class TopicSerializer(serializers.ModelSerializer):
     class Meta:
         model = Topic
         fields = (
-            "id", "name", "description", "quiz_count", "question_bank_count",
-            "attempt_count", "created_by", "created_at", "updated_at",
+            "id", "name", "description", "feedback_prompt", "quiz_count",
+            "question_bank_count", "attempt_count", "created_by", "created_at",
+            "updated_at",
         )
         read_only_fields = ("created_by", "created_at", "updated_at")

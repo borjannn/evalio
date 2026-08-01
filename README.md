@@ -102,8 +102,8 @@ whichever order matches what you need.
   BACKEND documents what each endpoint returns and who may call it; FRONTEND's §7
   maps every screen to the endpoints it consumes, so a change on either side can be
   traced to the other in one hop.
-- Each of the four also carries a **reserved section for LLM-generated feedback**,
-  the next major piece of work — see below.
+- Each of the four also carries a section on **AI-drafted feedback**, covering its
+  own half of that design — see below.
 
 ---
 
@@ -150,27 +150,36 @@ its password when it finishes.
 **Stack:** Django 6 (`>=6.0.6`) · Django REST Framework · SimpleJWT · PostgreSQL 16 ·
 Next.js 16.2.12 · React 19 · TypeScript 6 · Tailwind CSS v4
 
-**Tests:** 157, across six apps. `python manage.py test`
+**Tests:** 195, across six apps. `python manage.py test`
 
 ---
 
-## Reserved — LLM-generated feedback
+## AI-drafted feedback
 
-> **This section is intentionally left blank.**
->
-> The next major piece of work is generating feedback with a language model, rather
-> than only stitching together the teacher's hand-written per-choice explanations.
->
-> The intent is to keep what already works and add to it: the teacher's own words
-> stay the source of truth, and the deterministic passage remains the fallback when
-> generation is unavailable, slow, or disabled.
->
-> Each of the four documents has a matching reserved section for its own half of
-> the design:
->
-> - [ARCHITECTURE.md § 9](docs/ARCHITECTURE.md#9-reserved--llm-generated-feedback) — where the model sits in the system, and what crosses that boundary
-> - [BACKEND.md § 7](docs/BACKEND.md#reserved--llm-generated-feedback) — the integration point, which is deliberately one function
-> - [FRONTEND.md § 10](docs/FRONTEND.md#10-reserved--llm-generated-feedback) — how a generated passage is presented, labelled and degraded
-> - [SETUP.md § 11](docs/SETUP.md#11-reserved--llm-feedback-setup) — credentials, extra processes, and running locally without cost
->
-> _To be written._
+Teachers can have explanations drafted for them — one choice at a time from the
+**Suggest** button, or every gap in a quiz at once — review them, edit them, and
+publish. Provider is Google AI Studio (Gemini). It is **optional and off by
+default**: the app, the tests and every existing quiz work identically without it.
+
+The design turns on one observation. A per-choice explanation depends on the
+*content*, not on the student — "why is this answer wrong" is the same sentence
+for everyone who picks it — so it can be written **before anyone sits the quiz**.
+That means:
+
+- **No model call at runtime.** No student ever waits, nothing can fail
+  mid-submit, and cost scales with content authored rather than with traffic.
+- **The teacher reads the output first.** Nothing reaches a student unreviewed.
+- **Teacher-written text is never touched.** Drafts go in a separate column, the
+  generator skips any choice that already has an explanation, and the model is
+  never shown the teacher's prose at all.
+- **No student data leaves.** The payload is the topic, quiz title, question and
+  choices. No names, ids, scores or attempts.
+- **A quiz in AI mode cannot be published with a gap**, so a student never meets
+  an empty explanation.
+
+Where it is documented:
+
+- [ARCHITECTURE.md § 9](docs/ARCHITECTURE.md#9-ai-drafted-feedback) — why authoring-time, what crosses the boundary, why both texts are snapshotted
+- [BACKEND.md § 7](docs/BACKEND.md#ai-drafted-feedback) — models, endpoints, the publish gate, the rules generation obeys
+- [FRONTEND.md § 10](docs/FRONTEND.md#10-ai-drafted-feedback) — the authoring UI, and why no student screen changed
+- [SETUP.md § 11](docs/SETUP.md#11-ai-drafted-feedback) — the API key, free-tier limits, and running without spending anything

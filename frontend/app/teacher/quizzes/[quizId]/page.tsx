@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { ApiError, apiGet, apiGetAll } from "@/lib/api";
 import { requireTeacher } from "@/lib/auth";
 import type {
+  FeedbackReadiness,
   Paginated,
   QuestionBank,
   QuizDetailTeacher,
@@ -62,10 +63,16 @@ export default async function QuizBuilderPage({
   // would be one a teacher cannot file a question in, with nothing on screen to
   // say why. `pickable` stays a first page on purpose — it is search results,
   // and the panel says "Showing 12 of 40 matches. Narrow the search."
-  const [topic, banks, pickable] = await Promise.all([
+  //
+  // `readiness` is fetched here rather than from the client on mount so the
+  // counts and the gap list are in the first paint — the panel would otherwise
+  // flash "0 missing" on a quiz that has gaps, which is the one thing it exists
+  // to be trusted about. It is a pure count query; no API call reaches Google.
+  const [topic, banks, pickable, readiness] = await Promise.all([
     apiGet<Topic>(`/topics/${quiz.topic}/`),
     apiGetAll<QuestionBank>(`/question-banks/?topic=${quiz.topic}`),
     apiGet<Paginated<TeacherQuestionWithUsage>>(`/questions/?topic=${quiz.topic}`),
+    apiGet<FeedbackReadiness>(`/quizzes/${quizId}/feedback-readiness/`),
   ]);
 
   return (
@@ -87,6 +94,7 @@ export default async function QuizBuilderPage({
         banks={banks}
         pickable={pickable.results}
         pickableTotal={pickable.count}
+        readiness={readiness}
       />
     </div>
   );

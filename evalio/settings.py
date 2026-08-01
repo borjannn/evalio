@@ -102,6 +102,61 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
+# --- AI-drafted feedback -------------------------------------------------------
+#
+# Authoring-time only. Nothing in this block runs while a student is taking or
+# submitting a quiz: per-choice explanations depend on the *content*, not on the
+# attempt, so they are drafted once by the teacher and then snapshotted like any
+# other explanation. See docs/BACKEND.md §7.
+#
+# Read server-side in Django only. These never reach the browser, so the frontend
+# needs none of them.
+
+GOOGLE_AI_API_KEY = os.environ.get("GOOGLE_AI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Defaults **false**, so a fresh clone, a CI run and a forgotten .env can never
+# spend a token or reach the network by accident. The endpoints answer 503 while
+# it is off rather than failing somewhere deeper and less legibly.
+AI_FEEDBACK_ENABLED = os.environ.get("AI_FEEDBACK_ENABLED", "false").lower() in (
+    "1", "true", "yes",
+)
+
+# Seconds here; the Gemini SDK wants milliseconds and `GeminiProvider` converts.
+AI_FEEDBACK_TIMEOUT = float(os.environ.get("AI_FEEDBACK_TIMEOUT", "30"))
+
+# How many questions are drafted at once, and the ceiling the pacer holds the run
+# under. Requests-per-minute is the constraint that bites first on a free key, and
+# it is not the same thing as concurrency: 4 in flight against a 5 RPM key is a
+# burst of 429s. The pacer spaces requests to AI_FEEDBACK_RPM regardless of how
+# many workers are waiting, so raising concurrency alone can never breach the
+# quota. Raise both together after enabling billing.
+AI_FEEDBACK_CONCURRENCY = int(os.environ.get("AI_FEEDBACK_CONCURRENCY", "2"))
+AI_FEEDBACK_RPM = int(os.environ.get("AI_FEEDBACK_RPM", "5"))
+
+# 0 disables the model's thinking pass, which a two-sentence explanation does not
+# need and which costs latency and output tokens. ⚠️ Model-dependent: 2.5 Flash and
+# Flash Lite accept 0, the Pro models require -1 (automatic) or at least 128. If you
+# switch GEMINI_MODEL to a Pro model, change this too.
+AI_FEEDBACK_THINKING_BUDGET = int(os.environ.get("AI_FEEDBACK_THINKING_BUDGET", "0"))
+
+# A runaway response is a bug, not a feature — the prompt asks for two or three
+# sentences. A draft longer than this fails its question rather than being written.
+AI_FEEDBACK_MAX_LENGTH = 800
+
+# Dotted path, so the provider is injected rather than imported directly by the
+# service. This is what lets the test runner below swap in a deterministic fake
+# without a single test knowing that GeminiProvider exists.
+AI_FEEDBACK_PROVIDER = os.environ.get(
+    "AI_FEEDBACK_PROVIDER", "feedback.providers.gemini.GeminiProvider"
+)
+
+# §10 of the plan this implements: *nothing in the test suite may touch the
+# network*. Enforcing that per-test would mean every future test remembering to
+# override the provider, and the one that forgets spends real tokens against the
+# developer's own key. The runner forces the fake for the whole suite instead.
+TEST_RUNNER = "evalio.testrunner.EvalioTestRunner"
+
 ROOT_URLCONF = 'evalio.urls'
 
 TEMPLATES = [

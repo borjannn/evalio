@@ -9,7 +9,7 @@ single passage.
 """
 
 from attempts.models import AnswerResponse
-from quizzes.models import QuizQuestion
+from quizzes.models import Quiz, QuizQuestion
 
 from .models import FeedbackResult
 
@@ -73,6 +73,18 @@ def generate_feedback(attempt):
     Explanations come from the snapshot on `AnswerResponse`, not from the live `Choice`,
     so re-running this after a teacher edits the question rebuilds the same passage the
     student originally received.
+
+    Which snapshot depends on the quiz's `feedback_mode`. In `ai` mode the drafted
+    text is preferred and the teacher's own text is the fallback — that ordering is
+    D6 enforced at read time as well as at write time, so a teacher's explanation
+    wins even if drafted text somehow exists beside it. In `teacher` mode the
+    drafted text is simply ignored.
+
+    Because both are snapshots, toggling the mode on a quiz whose students have
+    already submitted behaves correctly without a special case: `ai` -> `teacher`
+    swaps them to the teacher's version, while `teacher` -> `ai` leaves them alone,
+    since the AI snapshot on their answers is empty — that text did not exist when
+    they answered. A snapshot records the past, and that is the whole mechanism.
     """
     question_ids = list(
         QuizQuestion.objects.filter(quiz=attempt.quiz)
@@ -90,6 +102,7 @@ def generate_feedback(attempt):
 
     correct_count = 0
     explanations = []
+    mode = attempt.quiz.feedback_mode
 
     # Walk in quiz order so the feedback passage follows the order the student saw.
     for question_id in question_ids:
@@ -98,7 +111,18 @@ def generate_feedback(attempt):
             correct_count += 1
             continue
         if answer is not None:
-            explanation = answer.choice_feedback_text.strip()
+            if mode == Quiz.FeedbackMode.AI:
+                # Teacher's text first, drafted text as the fallback — the mode is
+                # "AI-drafted, with teacher-written taking precedence", not "AI
+                # instead of". Generation already refuses to write over teacher
+                # prose, so the two are rarely both present; when they are, it is
+                # because the teacher wrote theirs *after* a draft existed, and
+                # that is precisely when theirs must win.
+                explanation = (
+                    answer.choice_feedback_text or answer.choice_ai_feedback_text
+                ).strip()
+            else:
+                explanation = answer.choice_feedback_text.strip()
             if explanation:
                 explanations.append(explanation)
 
@@ -121,3 +145,21 @@ def generate_feedback(attempt):
         },
     )
     return result
+
+
+def rebuild_feedback_for_quiz(quiz):
+    """Re-run `generate_feedback` for every submitted attempt on a quiz.
+
+    Called when `feedback_mode` changes, because the change is retroactive: the
+    passage a student already received was assembled from whichever snapshot the
+    old mode selected, and the new mode selects the other one.
+
+    This is a second *caller* of `generate_feedback`, not a second producer of
+    `FeedbackResult` — that function stays the only thing that writes one.
+
+    Cheap enough to run synchronously inside the mutation: one small query per
+    attempt and no API calls at all, because both texts were snapshotted at answer
+    time. `update_or_create` makes it idempotent, so a retry is harmless.
+    """
+    attempts = quiz.attempts.filter(submitted_at__isnull=False).select_related("quiz")
+    return [generate_feedback(attempt) for attempt in attempts]
