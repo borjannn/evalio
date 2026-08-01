@@ -54,11 +54,17 @@ class GeminiProvider:
             # wrong choice in a quiz reads as a template.
             temperature=0.4,
             max_output_tokens=2048,
-            thinking_config=types.ThinkingConfig(
-                thinking_budget=settings.AI_FEEDBACK_THINKING_BUDGET
-            ),
             http_options=types.HttpOptions(timeout=int(timeout * 1000)),
         )
+
+        # Omitted unless explicitly configured. The thinking knob is
+        # model-generation-specific — 2.5 wants a token budget, Gemini 3 wants a
+        # `thinking_level` and rejects a budget — so sending one by default would
+        # make every model upgrade a failed run.
+        if settings.AI_FEEDBACK_THINKING_BUDGET is not None:
+            config.thinking_config = types.ThinkingConfig(
+                thinking_budget=settings.AI_FEEDBACK_THINKING_BUDGET
+            )
 
         try:
             response = self._client.models.generate_content(

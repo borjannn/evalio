@@ -134,11 +134,18 @@ AI_FEEDBACK_TIMEOUT = float(os.environ.get("AI_FEEDBACK_TIMEOUT", "30"))
 AI_FEEDBACK_CONCURRENCY = int(os.environ.get("AI_FEEDBACK_CONCURRENCY", "2"))
 AI_FEEDBACK_RPM = int(os.environ.get("AI_FEEDBACK_RPM", "5"))
 
-# 0 disables the model's thinking pass, which a two-sentence explanation does not
-# need and which costs latency and output tokens. ⚠️ Model-dependent: 2.5 Flash and
-# Flash Lite accept 0, the Pro models require -1 (automatic) or at least 128. If you
-# switch GEMINI_MODEL to a Pro model, change this too.
-AI_FEEDBACK_THINKING_BUDGET = int(os.environ.get("AI_FEEDBACK_THINKING_BUDGET", "0"))
+# Blank by default, meaning **send no thinking config at all** and let the model use
+# its own. This is deliberately the safe default rather than the cheap one: the
+# knob is model-generation-specific — 2.5 takes a `thinking_budget` in tokens where
+# 0 disables it, Gemini 3 models take a `thinking_level` instead and reject a
+# budget — so a hard-coded value silently ties this project to one model family and
+# fails the whole run when you change GEMINI_MODEL.
+#
+# Set it to an integer only if you know your model accepts one: 0 turns thinking off
+# on 2.5 Flash, which a two-sentence explanation does not need and which saves
+# latency and output tokens.
+_thinking_budget = os.environ.get("AI_FEEDBACK_THINKING_BUDGET", "").strip()
+AI_FEEDBACK_THINKING_BUDGET = int(_thinking_budget) if _thinking_budget else None
 
 # A runaway response is a bug, not a feature — the prompt asks for two or three
 # sentences. A draft longer than this fails its question rather than being written.

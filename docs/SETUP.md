@@ -499,9 +499,26 @@ that happens while a student is submitting.
 
 ```ini
 GOOGLE_AI_API_KEY=your-key-here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 AI_FEEDBACK_ENABLED=true
 ```
+
+> ⚠️ **Check the model still exists before trusting whatever is written here.**
+> Google retires models to new keys while continuing to list them, and the failure
+> arrives as a 404 on your first real call — *"no longer available to new users"*.
+> `gemini-2.5-flash` was already in that state by the time this feature was built.
+> Ask your key what it can actually use:
+>
+> ```python
+> # python manage.py shell
+> from django.conf import settings
+> from google import genai
+> client = genai.Client(api_key=settings.GOOGLE_AI_API_KEY)
+> [m.name for m in client.models.list() if "generateContent" in (m.supported_actions or [])]
+> ```
+>
+> `gemini-flash-latest` is an alias that tracks the current flash model and never
+> goes stale, at the cost of the model changing under you without a code change.
 
 `env_example` carries all of these with blank values and comments.
 

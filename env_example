@@ -11,8 +11,13 @@ POSTGRES_PORT=5432
 
 # From https://aistudio.google.com/apikey. Server-side only: never prefix any of
 # these with NEXT_PUBLIC_, and never read them from the browser.
+#
+# ⚠️ Check this model still exists before trusting it. Google retires models to new
+# keys while still listing them, and the failure is a 404 saying "no longer
+# available to new users" on your first real call. `python manage.py shell` and
+# `genai.Client(...).models.list()` shows what your key can actually use.
 GOOGLE_AI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 
 # Leave false unless you have a key. With it off, the drafting endpoints answer
 # 503 and nothing else in the app changes.
@@ -28,7 +33,9 @@ AI_FEEDBACK_TIMEOUT=30
 AI_FEEDBACK_CONCURRENCY=2
 AI_FEEDBACK_RPM=5
 
-# 0 turns off the model's thinking pass, which a two-sentence explanation does not
-# need. Model-dependent: 2.5 Flash and Flash Lite accept 0, the Pro models need -1
-# or at least 128.
-AI_FEEDBACK_THINKING_BUDGET=0
+# Leave blank. Blank sends no thinking config at all and lets the model use its
+# own, which is the only setting that survives a model change: 2.5 takes a budget
+# in tokens where 0 disables thinking, Gemini 3 takes a `thinking_level` instead
+# and rejects a budget outright. Set it to 0 only if you have pinned a 2.5 model
+# and want the latency back.
+AI_FEEDBACK_THINKING_BUDGET=
