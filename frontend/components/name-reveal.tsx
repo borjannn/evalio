@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * An easter egg. Click your own name in the header five times inside three
@@ -237,7 +238,14 @@ export function NameReveal({ name }: { name: string }) {
         {name}
       </button>
 
-      {revealed && (
+      {/* Portalled to <body>, and that is load-bearing rather than tidiness.
+          Both headers carry `backdrop-blur-md`, and an element with a
+          `backdrop-filter` becomes the containing block for its
+          position:fixed descendants — so rendered in place, `fixed inset-0`
+          resolves to the 72px header strip and the reveal happens inside it.
+          The same is true of `filter`, `transform`, `perspective` and
+          `will-change`, which is why this cannot be fixed with a z-index. */}
+      {revealed && createPortal(
         <div
           role="dialog"
           aria-label={REVEALED_NAME}
@@ -264,21 +272,24 @@ export function NameReveal({ name }: { name: string }) {
             className="relative px-6 text-center"
             style={{ perspective: "1000px" }}
           >
-            <h2 className="egg-sheen text-[clamp(2.5rem,13vw,11rem)] leading-[1.05] font-semibold tracking-tight whitespace-nowrap">
+            <h2 className="text-[clamp(2.5rem,13vw,11rem)] leading-[1.05] font-semibold tracking-tight whitespace-nowrap">
               {REVEALED_NAME.split("").map((character, index) => (
                 <span
                   key={`${character}-${index}`}
                   className="egg-letter"
-                  // Staggered by index, which is the whole choreography — no
-                  // timeline, no library, just a delay per letter.
-                  style={{ animationDelay: `${index * 55}ms` }}
+                  // Two delays for the two animations on `.egg-letter`, in the
+                  // order they are declared there: the flight staggers by index
+                  // — the whole choreography, no timeline and no library — and
+                  // the sheen waits for the last letter to land before sweeping.
+                  style={{ animationDelay: `${index * 55}ms, 1.4s` }}
                 >
                   {character === " " ? " " : character}
                 </span>
               ))}
             </h2>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

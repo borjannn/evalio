@@ -549,22 +549,20 @@
     animation: evalio-egg-exit 0.55s cubic-bezier(0.7, 0, 0.84, 0) forwards;
   }
 
+  /* The gradient and the flight live on the **same element**, and that is not a
+     style choice. `background-clip: text` paints the background clipped to the
+     element's own glyphs; a child with its own `transform` is painted
+     separately, so a gradient clipped to the parent <h2> never reaches the
+     letters and they render with the inherited `color: transparent` — an
+     invisible name over very visible fireworks. Putting both on the letter
+     keeps the clip and the transform together, and the shared `background-size`
+     makes each glyph sweep the full palette. */
   .egg-letter {
     display: inline-block;
     /* `transform-style` and a perspective on the parent are what make the
        rotateX read as depth rather than as a vertical squash. */
     transform-style: preserve-3d;
     opacity: 0;
-    animation: evalio-egg-letter 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-
-  .egg-shockwave {
-    animation: evalio-egg-shockwave 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-
-  /* The sheen rides on top of the letters via background-clip, so it lights the
-     glyphs themselves rather than a rectangle behind them. */
-  .egg-sheen {
     background-image: linear-gradient(
       100deg,
       var(--color-primary) 0%,
@@ -577,7 +575,16 @@
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: evalio-egg-sheen 2.6s cubic-bezier(0.4, 0, 0.2, 1) 0.9s both;
+    /* Two animations, two delays. The component sets `animation-delay` as a
+       matching pair — the letter's stagger, then a fixed wait for the sheen so
+       the sweep starts once the whole name has landed. */
+    animation:
+      evalio-egg-letter 0.85s cubic-bezier(0.16, 1, 0.3, 1) both,
+      evalio-egg-sheen 2.6s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+
+  .egg-shockwave {
+    animation: evalio-egg-shockwave 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 }
 
@@ -597,7 +604,6 @@
   .mean-mark,
   .egg-backdrop,
   .egg-letter,
-  .egg-sheen,
   .egg-exit {
     animation: none;
   }
@@ -605,14 +611,13 @@
   /* The reveal still happens — it is the point of the interaction, and someone
      who asked for less motion still asked for this by clicking five times. It
      simply arrives finished: letters present, no flight, no sheen travel, and
-     the component skips the fireworks canvas entirely rather than freezing it. */
+     the component skips the fireworks canvas entirely rather than freezing it.
+     The gradient goes with the animation, so the glyphs need a solid colour
+     back or `color: transparent` would leave them invisible. */
   .egg-letter {
     opacity: 1;
-  }
-
-  .egg-sheen {
     background-image: none;
-    color: var(--color-primary);
+    color: #ffffff;
   }
 
   /* Removed rather than frozen: a shockwave parked mid-expansion is just a
