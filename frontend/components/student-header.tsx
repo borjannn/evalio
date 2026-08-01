@@ -2,6 +2,7 @@ import { LogOut } from "lucide-react";
 import Link from "next/link";
 
 import { Brand } from "@/components/brand";
+import { NameReveal } from "@/components/name-reveal";
 import { NavLink } from "@/components/nav-link";
 import { logout } from "@/lib/actions";
 import type { User } from "@/lib/types";
@@ -43,7 +44,9 @@ export function StudentHeader({ user }: { user: User }) {
         </div>
 
         <div className="flex items-center gap-4">
-          <span className="hidden text-sm font-medium sm:inline">{displayName}</span>
+          <span className="hidden sm:inline">
+            <NameReveal name={displayName} />
+          </span>
           <form action={logout}>
             <button
               type="submit"

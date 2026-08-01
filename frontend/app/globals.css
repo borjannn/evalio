@@ -323,6 +323,92 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   The name reveal (components/name-reveal.tsx).
+
+   Deliberately the loudest motion in the app, and deliberately the only thing
+   that is allowed to be: it is off the main path entirely, lasts five seconds,
+   and removes itself. Nothing here loops — the rule that only loading
+   indicators may loop still holds, because this ends on its own.
+
+   Each animation is one-shot with `forwards`, and `animation-delay` on the
+   letters does the staggering, so the whole sequence is declarative. Only the
+   fireworks are JavaScript, for the reason given in the component.
+   --------------------------------------------------------------------------- */
+
+/* The ground goes dark from the middle out, so the letters arrive on something
+   rather than on top of the page they interrupted. */
+@keyframes evalio-egg-backdrop {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+}
+
+/* Each letter is thrown in from below, overshoots, and settles. The rotation
+   and the blur are what stop it reading as a plain fade — they suggest the
+   letter travelled to get here. */
+@keyframes evalio-egg-letter {
+  0% {
+    opacity: 0;
+    transform: translateY(90px) rotateX(-70deg) scale(0.7);
+    filter: blur(12px);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-10px) rotateX(8deg) scale(1.06);
+    filter: blur(0px);
+  }
+  75% {
+    transform: translateY(3px) rotateX(-3deg) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotateX(0deg) scale(1);
+    filter: blur(0px);
+  }
+}
+
+/* A band of light crossing the finished words once they are all in place. */
+@keyframes evalio-egg-sheen {
+  from {
+    background-position: -250% 0;
+  }
+  to {
+    background-position: 250% 0;
+  }
+}
+
+/* A ring pushed out from behind the name on impact. Scale and opacity only —
+   nothing here touches layout. */
+@keyframes evalio-egg-shockwave {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+/* The whole overlay leaves upward and out, so the dismissal reads as
+   deliberate rather than as the page crashing back. */
+@keyframes evalio-egg-exit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
 @layer components {
   /* Stroke-drawn logo geometry. `pathLength="1"` on the SVG element normalises
      every shape to a length of 1, so one dasharray works for both the ring and
@@ -452,6 +538,47 @@
   .logo-jolt {
     animation: evalio-jolt 0.5s ease-out 0.15s both;
   }
+
+  /* --- The name reveal ------------------------------------------------ */
+
+  .egg-backdrop {
+    animation: evalio-egg-backdrop 0.45s ease-out both;
+  }
+
+  .egg-exit {
+    animation: evalio-egg-exit 0.55s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+  }
+
+  .egg-letter {
+    display: inline-block;
+    /* `transform-style` and a perspective on the parent are what make the
+       rotateX read as depth rather than as a vertical squash. */
+    transform-style: preserve-3d;
+    opacity: 0;
+    animation: evalio-egg-letter 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .egg-shockwave {
+    animation: evalio-egg-shockwave 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* The sheen rides on top of the letters via background-clip, so it lights the
+     glyphs themselves rather than a rectangle behind them. */
+  .egg-sheen {
+    background-image: linear-gradient(
+      100deg,
+      var(--color-primary) 0%,
+      #a855f7 20%,
+      #ffffff 42%,
+      #22d3ee 62%,
+      var(--color-primary) 85%
+    );
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: evalio-egg-sheen 2.6s cubic-bezier(0.4, 0, 0.2, 1) 0.9s both;
+  }
 }
 
 /* Mandatory, not a nicety. Everything above collapses to its finished state —
@@ -467,8 +594,32 @@
   .bar-rise,
   .bar-fill,
   .grid-sweep,
-  .mean-mark {
+  .mean-mark,
+  .egg-backdrop,
+  .egg-letter,
+  .egg-sheen,
+  .egg-exit {
     animation: none;
+  }
+
+  /* The reveal still happens — it is the point of the interaction, and someone
+     who asked for less motion still asked for this by clicking five times. It
+     simply arrives finished: letters present, no flight, no sheen travel, and
+     the component skips the fireworks canvas entirely rather than freezing it. */
+  .egg-letter {
+    opacity: 1;
+  }
+
+  .egg-sheen {
+    background-image: none;
+    color: var(--color-primary);
+  }
+
+  /* Removed rather than frozen: a shockwave parked mid-expansion is just a
+     stray ring sitting behind the name. */
+  .egg-shockwave {
+    animation: none;
+    display: none;
   }
 
   /* The colour change stays — that is feedback, not motion. Only the travel

@@ -2,6 +2,7 @@ import { LogOut } from "lucide-react";
 import Link from "next/link";
 
 import { Brand } from "@/components/brand";
+import { NameReveal } from "@/components/name-reveal";
 import { NavLink } from "@/components/nav-link";
 import { logout } from "@/lib/actions";
 import { requireTeacher } from "@/lib/auth";
@@ -58,7 +59,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium">{displayName}</span>
+            <NameReveal name={displayName} />
             {/* A form posting to a Server Function — no client component, and it
                 works with JavaScript disabled. */}
             <form action={logout}>
