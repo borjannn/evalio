@@ -13,7 +13,12 @@ import {
   type QuestionFormState,
   type QuestionPayload,
 } from "@/lib/question-actions";
-import type { QuestionBank, QuestionType, TeacherQuestionWithUsage } from "@/lib/types";
+import type {
+  QuestionBank,
+  QuestionType,
+  TeacherChoice,
+  TeacherQuestionWithUsage,
+} from "@/lib/types";
 
 /**
  * The question form — docs/FRONTEND.md §9. Same form for creating and editing.
@@ -60,6 +65,27 @@ function newRow(text = "", feedbackText = "", id?: number): Row {
   return { key: `row-${rowCounter}`, id, text, feedbackText };
 }
 
+/**
+ * A row for an existing choice. When the choice has no teacher text but does have
+ * an AI draft — from the bulk panel or an earlier Suggest — the draft is shown and
+ * marked. This is the behaviour the `TeacherChoice` contract in `lib/types.ts`
+ * promises: `ai_feedback_text` is displayed as a drafted field and becomes the
+ * teacher's own `feedback_text` when they save. Without it, feedback drafted in
+ * bulk is invisible here even though the "N drafted" counter says it exists.
+ */
+function rowFromChoice(choice: TeacherChoice): Row {
+  const hasTeacher = choice.feedback_text.trim().length > 0;
+  const showDraft =
+    !hasTeacher && !choice.is_correct && choice.ai_feedback_text.trim().length > 0;
+  const row = newRow(
+    choice.text,
+    hasTeacher ? choice.feedback_text : showDraft ? choice.ai_feedback_text : "",
+    choice.id,
+  );
+  row.drafted = showDraft;
+  return row;
+}
+
 function trueFalseRows(existing?: Row[]): Row[] {
   // Reuse the first two ids where possible so switching type on an existing
   // question edits its choices rather than orphaning submitted answers.
@@ -99,11 +125,7 @@ export function QuestionForm({
   const [bankChoice, setBankChoice] = useState<string>(String(bankId));
   const [newBankName, setNewBankName] = useState("");
   const [rows, setRows] = useState<Row[]>(() =>
-    question
-      ? question.choices.map((choice) =>
-          newRow(choice.text, choice.feedback_text, choice.id),
-        )
-      : [newRow(), newRow()],
+    question ? question.choices.map(rowFromChoice) : [newRow(), newRow()],
   );
   const [correctIndex, setCorrectIndex] = useState(() =>
     question ? Math.max(0, question.choices.findIndex((c) => c.is_correct)) : 0,
@@ -111,6 +133,8 @@ export function QuestionForm({
   const [warningAccepted, setWarningAccepted] = useState(false);
   const [suggesting, startSuggesting] = useTransition();
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  /** Choice ids with a per-field draft in flight, so each button spins on its own. */
+  const [suggestingIds, setSuggestingIds] = useState<ReadonlySet<number>>(new Set());
 
   const [state, formAction, pending] = useActionState<QuestionFormState, QuestionPayload>(
     saveQuestion,
@@ -184,6 +208,46 @@ export function QuestionForm({
         }),
       );
     });
+  }
+
+  /**
+   * Draft one choice — the per-field button.
+   *
+   * Deliberately replaces whatever is in the field, unlike the whole-question
+   * button which fills only the empty ones: a teacher who presses the button on a
+   * specific field is asking for a fresh draft of *that* one, and the mark plus
+   * "becomes yours when you save" make it clear the text is not theirs until they
+   * keep it. Only offered on a saved choice — the endpoint is keyed by choice id.
+   */
+  function suggestChoice(index: number) {
+    if (question === undefined) return;
+    const questionId = question.id;
+    const choiceId = rows[index].id;
+    if (choiceId === undefined) return;
+
+    setSuggestError(null);
+    setSuggestingIds((current) => new Set(current).add(choiceId));
+
+    void (async () => {
+      const result = await suggestFeedback(questionId, choiceId);
+      setSuggestingIds((current) => {
+        const next = new Set(current);
+        next.delete(choiceId);
+        return next;
+      });
+      if (result.error) {
+        setSuggestError(result.error);
+        return;
+      }
+      const suggestion = (result.suggestions ?? []).find((s) => s.choice_id === choiceId);
+      if (suggestion) {
+        setRows((current) =>
+          current.map((row, i) =>
+            i === index ? { ...row, feedbackText: suggestion.text, drafted: true } : row,
+          ),
+        );
+      }
+    })();
   }
 
   function removeRow(index: number) {
@@ -336,6 +400,8 @@ export function QuestionForm({
 
             {rows.map((row, index) => {
               const isCorrect = index === correctIndex;
+              const rowId = row.id;
+              const isDrafting = rowId !== undefined && suggestingIds.has(rowId);
               return (
                 <div
                   key={row.key}
@@ -400,12 +466,32 @@ export function QuestionForm({
                     className={isCorrect ? "cursor-not-allowed bg-secondary" : undefined}
                   />
 
-                  {!isCorrect && row.drafted && (
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Sparkles size={12} className="shrink-0" />
-                      Drafted for you. Edit it or leave it — it becomes yours when
-                      you save.
-                    </p>
+                  {!isCorrect && (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {rowId !== undefined ? (
+                        // Keyed by choice id, so only a saved choice can be drafted.
+                        // A brand-new row has no id yet — save first, then draft.
+                        <button
+                          type="button"
+                          onClick={() => suggestChoice(index)}
+                          disabled={isDrafting}
+                          className="pressable inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+                        >
+                          <Sparkles size={12} className="shrink-0" />
+                          {isDrafting ? "Drafting…" : "Suggest with AI"}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Save the question, then draft this one with AI.
+                        </span>
+                      )}
+                      {row.drafted && (
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Sparkles size={12} className="shrink-0" />
+                          Drafted — edit it or leave it; it becomes yours when you save.
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               );

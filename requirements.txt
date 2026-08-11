@@ -9,5 +9,10 @@ psycopg[binary]
 # when AI_FEEDBACK_ENABLED is on — the app runs without ever loading it.
 google-genai>=2.16.0
 
+# DeepSeek provider (feedback/providers/deepseek.py). DeepSeek speaks the OpenAI
+# wire format, so its provider uses the openai SDK pointed at DeepSeek's base URL.
+# Imported lazily inside the provider on the same terms as google-genai above.
+openai>=1.0.0
+
 # dev
 ruff

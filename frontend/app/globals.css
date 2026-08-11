@@ -233,6 +233,15 @@
   }
 }
 
+/* A plain rotation, for the one place a spinner is the honest shape: work whose
+   size is known but whose finish is not — the bulk feedback draft. Linear, so it
+   reads as steady effort rather than easing to a stop and implying it is done. */
+@keyframes evalio-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* --- Data display -----------------------------------------------------------
 
    A chart that appears fully drawn asks you to take its shape on trust. One that
@@ -513,10 +522,33 @@
     animation: evalio-breathe 1.8s ease-in-out infinite;
   }
 
+  /* A rotating ring. The element supplies the border and the gap (one
+     transparent side); this just turns it. */
+  .spin {
+    animation: evalio-spin 0.7s linear infinite;
+  }
+
   .skeleton {
     position: relative;
     overflow: hidden;
     background-color: var(--color-secondary);
+  }
+
+  /* A travelling highlight over a filled bar, so a determinate progress bar still
+     reads as *active* between the steps where its width jumps. Same sweep as the
+     skeleton, tuned lighter so it lifts the fill rather than washing it out. */
+  .progress-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, white 45%, transparent),
+      transparent
+    );
+    animation: evalio-shimmer 1.6s ease-in-out infinite;
   }
 
   .skeleton::after {
@@ -597,6 +629,7 @@
   .logo-trace,
   .logo-breathe,
   .logo-jolt,
+  .spin,
   .item-enter,
   .bar-rise,
   .bar-fill,

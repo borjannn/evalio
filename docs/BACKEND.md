@@ -20,9 +20,14 @@ client that consumes this API see [FRONTEND.md](FRONTEND.md).
 | `django-cors-headers` | Transitional — see **CORS** below |
 | `python-dotenv` | Loads `.env` into the environment at settings-import time |
 | `psycopg[binary]` | PostgreSQL driver |
+| `google-genai` | Gemini SDK — imported **only** inside `feedback/providers/gemini.py`, lazily, so a clone with AI drafting off never loads it |
+| `openai` | Used by the DeepSeek provider — DeepSeek speaks the OpenAI wire format, so its provider points the `openai` SDK at DeepSeek's base URL. Also imported lazily |
 | `ruff` | Linter (dev only) |
 
-Any new package must be added here in the same change that imports it.
+Any new package must be added here in the same change that imports it. The two AI
+SDKs are hard dependencies of the repo but soft dependencies of a *running*
+instance: both are imported inside their provider's method, never at module scope,
+so the app starts and the whole suite runs without either being reachable.
 
 ### Installed apps
 
@@ -268,6 +273,7 @@ list / create / retrieve / update / partial-update / destroy set.
 | --- | --- | --- |
 | `add_question/` | POST | `{question_id, order}`. Rejects questions from banks this teacher does not own. |
 | `remove_question/` | POST | `{question_id}` |
+| `import-questions/` | POST | `{questions: [...], bank \| new_bank_name}` — create questions from JSON and add them, in **one transaction**. See below. |
 | `reorder/` | POST | `{question_ids: [...]}` — sets every question's order in **one atomic call**. Must name exactly the questions currently in the quiz. |
 | `attempts/` | GET | Every attempt on this quiz (paginated) |
 | `results/` | GET | The whole results screen in one response — see below |
@@ -276,6 +282,19 @@ list / create / retrieve / update / partial-update / destroy set.
 `reorder/` replaced an earlier client-side loop of remove/add calls, which was
 neither atomic nor idempotent — an interruption part-way through left the quiz
 missing questions.
+
+`import-questions/` takes an array of `{text, type?, choices: [{text, correct,
+feedback?}]}`. The whole payload is validated by `quizzes/imports.py` — pure, so it
+touches no database — before anything is written, then every question is created
+through `QuestionTeacherSerializer` (so the import inherits the form's rules and
+`ai_feedback_text` stays read-only) and linked to the quiz, all inside one
+transaction. The pure validator adds the invariant the serializer does not carry,
+**exactly one correct choice**, and any failure names the offending question's
+1-based position and rolls the whole import back — a half-imported quiz is worse
+than a clean refusal. `feedback` becomes the teacher's own `feedback_text`, never
+`ai_feedback_text`, and is dropped on the correct choice. Questions are filed in an
+existing `bank` (checked to be in the quiz's topic) or a `new_bank_name` created in
+the same transaction.
 
 `results/` returns three shapes in one response because they answer one question
 ("how did this quiz go") and splitting them would make the screen fetch three times
@@ -568,11 +587,36 @@ feedback/
 ├── suggestions.py   # which choices need text, concurrency, validation, writes
 └── providers/
     ├── base.py      # the Protocol, the errors, FakeProvider
-    └── gemini.py    # the only module that talks to Google
+    ├── gemini.py    # Google AI Studio (default)
+    └── deepseek.py  # DeepSeek / any OpenAI-compatible endpoint
 ```
 
-`providers/gemini.py` imports no models. `suggestions.py` is the only module that
-touches both the provider and the ORM.
+Neither provider imports models. `suggestions.py` is the only module that touches
+both a provider and the ORM, and it never names a concrete provider — it resolves
+`AI_FEEDBACK_PROVIDER` (a dotted path) through `import_string`, so adding a third
+provider is a new file plus a settings line, with no edit to the pipeline.
+
+| Setting | Default | Read by |
+| --- | --- | --- |
+| `AI_FEEDBACK_PROVIDER` | `feedback.providers.gemini.GeminiProvider` | `suggestions.py` |
+| `GOOGLE_AI_API_KEY`, `GEMINI_MODEL` | — / `gemini-2.5-flash` | `gemini.py` only |
+| `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL` | — / `https://api.deepseek.com` / `deepseek-chat` | `deepseek.py` only |
+
+Each provider owns its key, model and endpoint, so switching providers never means
+renaming a shared key. The DeepSeek block's base-URL and model defaults are what
+let it point at a self-hosted **vLLM / LiteLLM proxy** (set `DEEPSEEK_BASE_URL` to
+the proxy's `/v1` URL and `DEEPSEEK_MODEL` to the alias it serves) as readily as at
+DeepSeek's own API.
+
+> **Why DeepSeek needs a normaliser and Gemini does not.** Gemini consumes the
+> `response_schema` and returns the bare list `_validate` expects. DeepSeek has only
+> JSON *mode* — valid JSON, but constrained to a top-level object and blind to the
+> schema — so open models wrap the list inconsistently. `deepseek.py::_to_entries`
+> flattens all the observed shapes (a bare list, `{"1020": "text", …}` id-keyed
+> maps, a single wrapped array, one un-listed entry) back to
+> `[{choice_id, feedback}]` before `_validate` does the real checking. JSON mode
+> also requires the literal word "json" in the prompt, which `prompts.py` already
+> satisfies — a real coupling, called out in the provider's docstring.
 
 #### Fields
 
@@ -597,7 +641,7 @@ touches both the provider and the ORM.
 
 | Method & path | Purpose | Permission |
 | --- | --- | --- |
-| `POST /api/questions/{id}/suggest-feedback/` | Draft one question's wrong choices. **Writes nothing.** | `IsTeacher`, `IsTopicOwner` |
+| `POST /api/questions/{id}/suggest-feedback/` | Draft the question's wrong choices, or one of them with `{"choice_id": N}` in the body. **Writes nothing.** | `IsTeacher`, `IsTopicOwner` |
 | `POST /api/quizzes/{id}/generate-feedback/` | Draft every **blank** wrong choice in the quiz | `IsTeacher`, `IsOwner` |
 | `GET /api/quizzes/{id}/feedback-readiness/` | Counts, the gap list, the planned call count | `IsTeacher`, `IsOwner` |
 | `PATCH /api/quizzes/{id}/` | Existing endpoint; now accepts `feedback_mode` | `IsTeacher`, `IsOwner` |
@@ -608,7 +652,12 @@ queryset filters before `get_object()`.
 `suggest-feedback/` returns drafts without storing them, because the teacher is
 looking straight at the field. Accepting one is the ordinary
 `PATCH /api/questions/{id}/` nested write, which already diffs choices by id.
-There is no new write endpoint.
+There is no new write endpoint. An optional `choice_id` narrows the draft to a
+single wrong choice — the per-field button — instead of every wrong choice; it is
+still one model call, the difference is how many explanations that call asks for,
+which keeps a per-field click cheap on a metered key. A `choice_id` that is not the
+question's, or that names the correct choice, returns an empty `suggestions` list
+rather than an error.
 
 ```jsonc
 // POST /generate-feedback/ — partial success is normal and reported honestly
@@ -785,7 +834,7 @@ queries — the invariant that matters is "doesn't grow", not an exact count.
 
 ## 10. Testing
 
-**195 tests across six apps.** Run the whole suite before finishing any backend
+**208 tests across six apps.** Run the whole suite before finishing any backend
 change.
 
 ```bash
@@ -796,10 +845,10 @@ python manage.py test attempts     # one app
 | App | Tests | Covers |
 | --- | ---: | --- |
 | `accounts` | 6 | Registration cannot grant the teacher role |
-| `quizzes` | 70 | Ownership isolation, choice diffing on edit, atomic reorder, both roles' annotations, `/results/`, the N+1 guard, the drafting endpoints and the publish gate |
+| `quizzes` | 83 | Ownership isolation, choice diffing on edit, atomic reorder, both roles' annotations, `/results/`, the N+1 guard, the drafting endpoints and the publish gate, the per-choice Suggest, and the all-or-nothing JSON import |
 | `classes` | 35 | Assignment target constraints, assignment resolution, scoped student search, invite non-disclosure, audience ↔ visibility agreement |
 | `attempts` | 27 | Full lifecycle, resume-not-duplicate, correctness withheld, snapshots written, cross-student isolation, the teacher/student detail split |
-| `feedback` | 39 | Ordering, unanswered questions, blank explanations, fallbacks, idempotent re-submission, immunity to later edits, and the whole drafting layer: what generation refuses to write, both toggle directions, the rate pacer |
+| `feedback` | 29 | Ordering, unanswered questions, blank explanations, fallbacks, idempotent re-submission, immunity to later edits, and the drafting layer: what generation refuses to write, both toggle directions, the rate pacer |
 | `analytics` | 28 | Each grouping, both metrics, filter validation, ownership scoping |
 
 > If a test asserts a **404 where you expect 403**, or asserts a field is

@@ -89,6 +89,28 @@ export function TracingMark({ className }: { className?: string }) {
   );
 }
 
+/**
+ * A small rotating ring, for a control whose work is in flight.
+ *
+ * Unlike `<PageLoader>` this is inline and sized to sit beside text — a button
+ * mid-action, a progress line. The ring is a border with one transparent side, so
+ * it needs no SVG; `currentColor` lets it take the colour of whatever it sits in.
+ * It loops, which is allowed for the same reason the others here do: it is a
+ * loading indicator, and it unmounts the moment the work finishes.
+ */
+export function Spinner({ className }: { className?: string }) {
+  return (
+    <span
+      role="status"
+      aria-label="Working…"
+      className={cn(
+        "spin inline-block size-4 shrink-0 rounded-full border-2 border-current border-t-transparent",
+        className,
+      )}
+    />
+  );
+}
+
 /** A page title and subtitle, as skeletons. Every list screen opens with one. */
 export function HeadingSkeleton() {
   return (

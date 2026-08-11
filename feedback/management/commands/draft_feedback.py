@@ -68,7 +68,7 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Topic prompt: {prompt if prompt else '(none - using the built-in template alone)'}"
         )
-        self.stdout.write(f"Model: {settings.GEMINI_MODEL}\n")
+        self.stdout.write(f"Provider: {settings.AI_FEEDBACK_PROVIDER}\n")
 
         if options["write"]:
             return self._write(quiz)

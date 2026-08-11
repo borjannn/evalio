@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/loader";
 import { Section } from "@/components/ui/section";
 import { cn } from "@/lib/cn";
 import type { BulkGenerationResult, FeedbackMode, FeedbackReadiness } from "@/lib/types";
@@ -72,13 +73,23 @@ export function FeedbackPanel({
     startDrafting(async () => {
       // Poll while the request is in flight. Each completed question is written
       // immediately, so the falling gap count is a genuine measurement.
+      //
+      // The poll goes through the `feedback-readiness/` **route handler**, not the
+      // `loadFeedbackReadiness` Server Action, and that is load-bearing: Server
+      // Actions run one at a time, so a Server Action polled here would sit behind
+      // the minute-long draft below and only report once it had already finished —
+      // the bar would jump 0 → full. A route handler fetch runs concurrently.
       let polling = true;
       const poll = async () => {
         while (polling) {
           await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
           if (!polling) break;
           try {
-            setReadiness(await loadFeedbackReadiness(quizId));
+            const response = await fetch(
+              `/teacher/quizzes/${quizId}/feedback-readiness`,
+              { cache: "no-store" },
+            );
+            if (response.ok) setReadiness((await response.json()) as FeedbackReadiness);
           } catch {
             // A failed poll is not a failed run. The request below is what
             // decides the outcome; this only keeps the readout moving.
@@ -202,7 +213,7 @@ export function FeedbackPanel({
               <>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button onClick={draft} disabled={drafting}>
-                    <Sparkles size={16} />
+                    {drafting ? <Spinner /> : <Sparkles size={16} />}
                     {drafting ? "Drafting…" : `Draft ${gapCount} missing`}
                   </Button>
                   <span className="text-sm text-muted-foreground">
@@ -223,8 +234,11 @@ export function FeedbackPanel({
                 </div>
 
                 {drafting && runTotal > 0 && (
+                  // The track carries a looping sheen so the bar reads as active
+                  // even at 0%, before the first question lands; the fill is the
+                  // real, measured progress and animates its width between steps.
                   <div
-                    className="h-1 w-full overflow-hidden rounded-full bg-border"
+                    className="progress-shimmer relative h-1.5 w-full overflow-hidden rounded-full bg-border"
                     role="progressbar"
                     aria-valuemin={0}
                     aria-valuemax={runTotal}

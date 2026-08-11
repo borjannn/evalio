@@ -1022,6 +1022,47 @@ class AIDraftingEndpointTests(APITestCase):
             response = self.client.post(f"/api/questions/{self.question.id}/suggest-feedback/")
         self.assertEqual(response.status_code, 503)
 
+    def test_suggest_can_target_a_single_choice(self):
+        """A `choice_id` narrows the draft to that one wrong choice — the per-field button."""
+        second_wrong = Choice.objects.create(
+            question=self.question, text="Metallic", is_correct=False
+        )
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post(
+            f"/api/questions/{self.question.id}/suggest-feedback/",
+            {"choice_id": self.wrong.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        ids = [s["choice_id"] for s in response.data["suggestions"]]
+        self.assertEqual(ids, [self.wrong.id])
+        self.assertNotIn(second_wrong.id, ids)
+
+        # Still writes nothing — the draft goes to the teacher's hands, not the DB.
+        self.wrong.refresh_from_db()
+        self.assertEqual(self.wrong.ai_feedback_text, "")
+        self.assertEqual(self.wrong.feedback_text, "")
+
+    def test_suggest_for_the_correct_choice_returns_nothing(self):
+        """The correct choice is never explained, even when asked for by id."""
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post(
+            f"/api/questions/{self.question.id}/suggest-feedback/",
+            {"choice_id": self.correct.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["suggestions"], [])
+
+    def test_suggest_with_a_non_integer_choice_id_is_400(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post(
+            f"/api/questions/{self.question.id}/suggest-feedback/",
+            {"choice_id": "not-a-number"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
     # --- bulk generate -----------------------------------------------------
 
     def test_generate_writes_ai_text_only(self):
@@ -1174,3 +1215,139 @@ class PublishGateTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.wrong.refresh_from_db()
         self.assertEqual(self.wrong.ai_feedback_text, "")
+
+
+class ImportQuestionsTests(APITestCase):
+    """POST /api/quizzes/{id}/import-questions/ — atomic JSON import into a quiz."""
+
+    TWO_GOOD = [
+        {
+            "text": "Longest river?",
+            "choices": [
+                {"text": "Nile", "correct": True},
+                {"text": "Thames", "correct": False, "feedback": "Far too short."},
+            ],
+        },
+        {
+            "text": "A river's mouth is where it...",
+            "type": "mc",
+            "choices": [
+                {"text": "meets the sea", "correct": True},
+                {"text": "begins", "correct": False},
+                {"text": "bends", "correct": False},
+            ],
+        },
+    ]
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.other_teacher = make_teacher("other")
+        self.student = make_student()
+        self.topic = Topic.objects.create(name="Geography", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="Rivers")
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Rivers quiz", created_by=self.teacher
+        )
+        self.url = f"/api/quizzes/{self.quiz.id}/import-questions/"
+
+    def _post(self, questions, **extra):
+        return self.client.post(
+            self.url, {"questions": questions, **extra}, format="json"
+        )
+
+    def test_import_creates_questions_and_links_them_in_order(self):
+        self.client.force_authenticate(self.teacher)
+        response = self._post(self.TWO_GOOD, bank=self.bank.id)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["created"], 2)
+
+        links = list(self.quiz.quizquestion_set.order_by("order"))
+        self.assertEqual([link.order for link in links], [0, 1])
+        self.assertEqual(links[0].question.text, "Longest river?")
+
+        # Feedback landed on the wrong choice as teacher text, never AI text.
+        wrong = links[0].question.choices.get(text="Thames")
+        self.assertEqual(wrong.feedback_text, "Far too short.")
+        self.assertEqual(wrong.ai_feedback_text, "")
+
+    def test_import_appends_after_existing_questions(self):
+        existing = Question.objects.create(
+            question_bank=self.bank, text="Old", created_by=self.teacher
+        )
+        Choice.objects.create(question=existing, text="a", is_correct=True)
+        Choice.objects.create(question=existing, text="b", is_correct=False)
+        self.quiz.quizquestion_set.create(question=existing, order=0)
+
+        self.client.force_authenticate(self.teacher)
+        response = self._post(self.TWO_GOOD, bank=self.bank.id)
+
+        self.assertEqual(response.status_code, 201)
+        orders = list(
+            self.quiz.quizquestion_set.order_by("order").values_list("order", flat=True)
+        )
+        self.assertEqual(orders, [0, 1, 2])
+
+    def test_import_can_create_a_new_bank(self):
+        self.client.force_authenticate(self.teacher)
+        response = self._post(self.TWO_GOOD, new_bank_name="Imported")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            QuestionBank.objects.filter(topic=self.topic, name="Imported").exists()
+        )
+
+    def test_zero_correct_choices_is_rejected_with_the_position(self):
+        bad = [{"text": "Q", "choices": [{"text": "a"}, {"text": "b"}]}]
+        self.client.force_authenticate(self.teacher)
+        response = self._post(bad, bank=self.bank.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Question 1", response.data["detail"])
+        self.assertEqual(self.quiz.quizquestion_set.count(), 0)
+
+    def test_two_correct_choices_is_rejected(self):
+        bad = [
+            {
+                "text": "Q",
+                "choices": [
+                    {"text": "a", "correct": True},
+                    {"text": "b", "correct": True},
+                ],
+            }
+        ]
+        self.client.force_authenticate(self.teacher)
+        self.assertEqual(self._post(bad, bank=self.bank.id).status_code, 400)
+
+    def test_a_bad_question_rolls_the_whole_import_back(self):
+        mixed = self.TWO_GOOD + [
+            {"text": "no correct", "choices": [{"text": "a"}, {"text": "b"}]}
+        ]
+        self.client.force_authenticate(self.teacher)
+        before = Question.objects.count()
+        response = self._post(mixed, new_bank_name="ShouldNotStick")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Question 3", response.data["detail"])
+        # Nothing created — not the good questions, not the new bank.
+        self.assertEqual(Question.objects.count(), before)
+        self.assertEqual(self.quiz.quizquestion_set.count(), 0)
+        self.assertFalse(QuestionBank.objects.filter(name="ShouldNotStick").exists())
+
+    def test_empty_questions_array_is_rejected(self):
+        self.client.force_authenticate(self.teacher)
+        self.assertEqual(self._post([], bank=self.bank.id).status_code, 400)
+
+    def test_bank_from_another_topic_is_404(self):
+        other_topic = Topic.objects.create(name="Other", created_by=self.teacher)
+        other_bank = QuestionBank.objects.create(topic=other_topic, name="Elsewhere")
+        self.client.force_authenticate(self.teacher)
+        self.assertEqual(self._post(self.TWO_GOOD, bank=other_bank.id).status_code, 404)
+
+    def test_another_teachers_quiz_is_404(self):
+        self.client.force_authenticate(self.other_teacher)
+        self.assertEqual(self._post(self.TWO_GOOD, new_bank_name="X").status_code, 404)
+
+    def test_a_student_cannot_import(self):
+        self.client.force_authenticate(self.student)
+        self.assertIn(self._post(self.TWO_GOOD, new_bank_name="X").status_code, (403, 404))

@@ -19,6 +19,24 @@ POSTGRES_PORT=5432
 GOOGLE_AI_API_KEY=
 GEMINI_MODEL=gemini-3.6-flash
 
+# Which provider drafts feedback. A dotted path to any class with a
+# generate(prompt, schema, timeout) method — Django's import_string resolves it at
+# call time, so swapping models is this one line plus that provider's key below.
+# Defaults to Gemini when unset.
+#   feedback.providers.gemini.GeminiProvider     (default)
+#   feedback.providers.deepseek.DeepSeekProvider
+# AI_FEEDBACK_PROVIDER=feedback.providers.deepseek.DeepSeekProvider
+
+# DeepSeek — or any OpenAI-compatible endpoint. Only DEEPSEEK_API_KEY is required
+# for DeepSeek's own API; base URL and model then default to https://api.deepseek.com
+# and deepseek-chat. To point at a self-hosted vLLM or LiteLLM proxy instead, set
+# DEEPSEEK_BASE_URL to its /v1 URL and DEEPSEEK_MODEL to the exact model alias that
+# endpoint serves (a LiteLLM proxy names its allowed models in the 403 it returns
+# for a wrong one). Read only when the provider above points at DeepSeek.
+DEEPSEEK_API_KEY=
+# DEEPSEEK_MODEL=deepseek-chat
+# DEEPSEEK_BASE_URL=https://api.deepseek.com
+
 # Leave false unless you have a key. With it off, the drafting endpoints answer
 # 503 and nothing else in the app changes.
 AI_FEEDBACK_ENABLED=false

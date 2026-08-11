@@ -150,7 +150,7 @@ its password when it finishes.
 **Stack:** Django 6 (`>=6.0.6`) · Django REST Framework · SimpleJWT · PostgreSQL 16 ·
 Next.js 16.2.12 · React 19 · TypeScript 6 · Tailwind CSS v4
 
-**Tests:** 195, across six apps. `python manage.py test`
+**Tests:** 208, across six apps. `python manage.py test`
 
 ---
 
@@ -158,8 +158,10 @@ Next.js 16.2.12 · React 19 · TypeScript 6 · Tailwind CSS v4
 
 Teachers can have explanations drafted for them — one choice at a time from the
 **Suggest** button, or every gap in a quiz at once — review them, edit them, and
-publish. Provider is Google AI Studio (Gemini). It is **optional and off by
-default**: the app, the tests and every existing quiz work identically without it.
+publish. The provider is pluggable — Google AI Studio (Gemini) by default, or a
+DeepSeek / OpenAI-compatible endpoint — chosen by one setting. It is **optional and
+off by default**: the app, the tests and every existing quiz work identically
+without it.
 
 The design turns on one observation. A per-choice explanation depends on the
 *content*, not on the student — "why is this answer wrong" is the same sentence

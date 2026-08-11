@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, GripVertical, Pencil, X } from "lucide-react";
+import { ChevronRight, GripVertical, Pencil, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -101,10 +101,22 @@ export function QuestionRow({
                     {choice.text}
                   </span>
                 </div>
-                {/* Explanations only ever exist on wrong choices. */}
+                {/* Explanations only ever exist on wrong choices. Teacher text
+                    wins; an AI draft with no teacher text is shown but marked, so
+                    "N drafted" on the feedback panel has somewhere to be seen. */}
                 {!choice.is_correct && (
                   <p className="mt-0.5 ml-6 text-muted-foreground">
-                    {choice.feedback_text || (
+                    {choice.feedback_text ? (
+                      choice.feedback_text
+                    ) : choice.ai_feedback_text ? (
+                      <>
+                        <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium">
+                          <Sparkles size={11} className="shrink-0" />
+                          AI draft
+                        </span>
+                        {choice.ai_feedback_text}
+                      </>
+                    ) : (
                       <span className="text-amber-700">No explanation — no feedback.</span>
                     )}
                   </p>

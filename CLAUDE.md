@@ -415,7 +415,7 @@ Frontend: `npm run lint` and `npm run typecheck` from `frontend/`.
 
 ## Testing
 
-195 tests across six apps. Run the suite before finishing any backend change. It takes ~10 minutes,
+208 tests across six apps. Run the suite before finishing any backend change. It takes ~10 minutes,
 so `--keepdb` is worth it while iterating, and `--noinput` avoids the "delete the existing test
 database?" prompt hanging forever on a non-interactive stdin.
 

@@ -291,7 +291,10 @@ rebuilds the same passage the student originally received.
 
 ## 9. AI-drafted feedback
 
-Provider: **Google AI Studio (Gemini)**, behind a one-method interface.
+Provider: **pluggable, behind a one-method interface.** Google AI Studio (Gemini)
+is the default; a DeepSeek / OpenAI-compatible provider ships alongside it. The
+concrete class is chosen by a dotted path in `AI_FEEDBACK_PROVIDER`, so switching
+models is one settings line and that provider's own key — see §9.3.
 
 ### 9.1 The shape, and why it is this shape
 
@@ -318,7 +321,7 @@ snapshotted text the deterministic path always used.
 
 ### 9.2 What crosses the boundary
 
-Sent to Google, per question, one call each:
+Sent to the provider, per question, one call each:
 
 | Included | Excluded |
 | --- | --- |
@@ -343,15 +346,32 @@ quizzes/views.py  ──POST /suggest-feedback/, /generate-feedback/──┐
                                                concurrency, validation,
                                                writes ai_feedback_text)
                                                         │
-                                            feedback/providers/gemini.py
-                                              (the only module that
-                                               talks to Google)
+                                     import_string(AI_FEEDBACK_PROVIDER)
+                                                        │
+                            ┌───────────────────────────┴───────────────────────────┐
+                            ▼                                                         ▼
+              feedback/providers/gemini.py                        feedback/providers/deepseek.py
+              (talks to Google AI Studio)                    (any OpenAI-compatible endpoint —
+                                                              DeepSeek's API, or a self-hosted
+                                                              vLLM / LiteLLM proxy)
 ```
 
-`feedback/providers/gemini.py` imports no Django models. It takes a prompt and a
-response schema and returns parsed JSON or raises. The provider is resolved by
-dotted path from settings, so the test runner substitutes a deterministic fake
-for the whole suite and no test can reach the network.
+A provider imports no Django models. It takes a prompt and a response schema and
+returns parsed JSON or raises. The provider is resolved by **dotted path** from
+settings (`AI_FEEDBACK_PROVIDER`, via Django's `import_string`), which is the seam
+two things hang off: swapping models is one settings line plus that provider's key,
+and the test runner substitutes a deterministic fake for the whole suite so no test
+can reach the network.
+
+The two shipped providers differ only in what the vendor's wire format forces.
+Gemini consumes the `response_schema` directly and returns the list the pipeline
+wants. DeepSeek (and the OpenAI-compatible endpoints it stands in for) has only a
+coarse JSON *mode*, not schema-constrained output, so its provider carries the
+prompt-side "return JSON" coupling and a small normaliser that flattens the
+several shapes such models return — a bare list, an id-keyed map, or a wrapped
+array — back to the `[{choice_id, feedback}]` the shared validator checks. The
+shape is enforced *after* the call in both cases, by `suggestions.py::_validate`,
+so a provider only has to deliver the container.
 
 `feedback/services.py::generate_feedback` remains **the only producer of a
 `FeedbackResult`**. The mode toggle adds a second *caller*, not a second producer.

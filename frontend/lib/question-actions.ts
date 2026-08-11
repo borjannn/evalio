@@ -164,13 +164,18 @@ export type SuggestionState = {
   error?: string;
 };
 
-export async function suggestFeedback(questionId: number): Promise<SuggestionState> {
+export async function suggestFeedback(
+  questionId: number,
+  choiceId?: number,
+): Promise<SuggestionState> {
   await requireTeacher();
 
   try {
     const data = await apiPost<{ suggestions: { choice_id: number; text: string }[] }>(
       `/questions/${questionId}/suggest-feedback/`,
-      {},
+      // A choice id narrows the draft to that one field; omitting it drafts every
+      // wrong choice. Same endpoint, one call either way.
+      choiceId === undefined ? {} : { choice_id: choiceId },
     );
     return { suggestions: data.suggestions };
   } catch (error) {

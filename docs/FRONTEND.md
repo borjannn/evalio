@@ -425,7 +425,7 @@ Every route, the guard it applies, and the endpoints it calls.
 | `/teacher/topics/[topicId]` | `GET /api/topics/{id}/` · `GET /api/quizzes/?topic=&page=` · `GET /api/question-banks/?topic=&page=` · `POST /api/quizzes/` · `PATCH /api/topics/{id}/` |
 | `/teacher/topics/[topicId]/banks` | `GET /api/topics/{id}/` · `GET /api/question-banks/?topic=` · `POST` · `PATCH` · `DELETE /api/question-banks/{id}/` |
 | `/teacher/topics/[topicId]/banks/[bankId]` | `GET /api/question-banks/{id}/` (nests questions) · `GET /api/question-banks/?topic=` *(all pages)* · `POST` / `PATCH` `/api/questions/` |
-| `/teacher/quizzes/[quizId]` **(builder)** | `GET /api/quizzes/{id}/` · `GET /api/topics/{id}/` · `GET /api/question-banks/?topic=` *(all pages)* · `GET /api/questions/?topic=` · `PATCH /api/quizzes/{id}/` · `DELETE` · `POST .../add_question/` · `.../remove_question/` · `.../reorder/` · `GET /api/questions/{id}/` |
+| `/teacher/quizzes/[quizId]` **(builder)** | `GET /api/quizzes/{id}/` · `GET /api/topics/{id}/` · `GET /api/question-banks/?topic=` *(all pages)* · `GET /api/questions/?topic=` · `PATCH /api/quizzes/{id}/` · `DELETE` · `POST .../add_question/` · `.../remove_question/` · `.../reorder/` · `.../import-questions/` · `GET /api/questions/{id}/` |
 | `/teacher/quizzes/[quizId]/assign` | `GET /api/quizzes/{id}/` · `GET /api/classes/` *(all)* · `GET /api/groups/` *(all)* · `GET /api/assignments/?quiz=` *(all)* · `GET /api/quizzes/{id}/audience/` · `POST` / `DELETE /api/assignments/` · `GET /api/students/search/?q=` |
 | `/teacher/quizzes/[quizId]/results` | `GET /api/quizzes/{id}/` · `GET /api/quizzes/{id}/results/` |
 | `/teacher/quizzes/[quizId]/results/[attemptId]` | `GET /api/attempts/{id}/` *(teacher shape)* · `GET /api/quizzes/{id}/` · `GET /api/feedback/attempts/{id}/` |
@@ -485,6 +485,16 @@ special cases.
 
 > ⚠️ **The reorder is committed in `drop`, never in `dragend`.** `dragend` fires on
 > cancel too, so committing there makes Escape reorder the quiz anyway.
+
+**Adding questions has three paths, tabs inside one panel:** *Write a question*
+(the shared `question-form.tsx`), *Add from a bank* (`bank-picker.tsx`), and
+*Import JSON* (`import-panel.tsx`). Import is for turning a block of JSON — a
+teacher's own or an LLM's — into questions without typing each choice; it pairs
+with feedback drafting, since the import carries answers and the Suggest buttons
+fill the explanations. Invalid JSON is caught client-side with a plain message
+before any request; the server import is all-or-nothing and names the offending
+question, so a paste never half-lands. *Write* is the default tab because a new
+teacher's banks are empty, so bank-first would be a dead end on day one.
 
 The header groups four different kinds of control: identity (title, Draft/Published
 badge, rename) on the left, the two read-only side trips (Results, Assign) in a
@@ -557,7 +567,8 @@ Everything below is authoring UI.
 | File | What it does |
 | --- | --- |
 | `app/teacher/topics/[topicId]/edit-topic.tsx` | The topic's drafting instructions — voice for every quiz in the topic |
-| `components/question-form.tsx` | **Suggest explanations** — drafts every empty wrong choice on one question |
+| `components/question-form.tsx` | **Suggest** — a per-field button drafts one wrong choice; the whole-question button fills every empty one. Existing AI drafts show here, marked. |
+| `app/teacher/quizzes/[quizId]/question-row.tsx` | The collapsed question view labels an AI draft *"AI draft"* rather than reading "No explanation" |
 | `app/teacher/quizzes/[quizId]/feedback-panel.tsx` | Mode switch, readiness summary, bulk drafting, the gap list |
 | `app/teacher/quizzes/[quizId]/actions.ts` | `setFeedbackMode`, `generateQuizFeedback`, `loadFeedbackReadiness` |
 | `lib/question-actions.ts` | `suggestFeedback` — shared, so it sits in `lib/` |
@@ -568,11 +579,16 @@ This is the content rule of the whole feature, and three things enforce it:
 
 - **A drafted field is marked** while it holds text the teacher did not type, and
   the mark comes off in the same keystroke they edit it — at which point it is
-  theirs.
-- **Suggest fills empty explanations only.** The endpoint drafts every wrong
-  choice of the question, but the form discards any draft for a field the teacher
-  has already written in. Losing their prose because they pressed a convenience
-  button is the exact surprise this must not produce.
+  theirs. This applies to text drafted in bulk too: opening a question shows its
+  `ai_feedback_text` in the field, marked, and it becomes the teacher's
+  `feedback_text` only when they save. Without this a bulk-drafted explanation is
+  invisible in the editor while "N drafted" insists it exists.
+- **The whole-question Suggest fills empty explanations only** — it discards any
+  draft for a field the teacher has already written in, because losing their prose
+  to a convenience button is the exact surprise this must not produce. **The
+  per-field button is the deliberate exception:** pressing the button *on* a field
+  is a request for a fresh draft of that one, so it replaces what is there, and the
+  mark makes clear the new text is not theirs until they keep it.
 - **Drafted and written are counted separately** — "5 yours · 29 drafted · 2
   missing" — and never merged into one "done" number.
 
@@ -590,12 +606,22 @@ submitted:
 
 Bulk drafting can take a minute, and a silent spinner reads as a hang. The panel
 polls `feedback-readiness/` every two seconds while the request is in flight and
-reports *"7 of 31 done"*.
+reports *"7 of 31 done"*, with a `<Spinner>` on the button and a looping sheen on
+the progress track so the wait reads as active even before the first question
+lands.
 
 That number is real. Generation persists each question the moment it completes,
 so a falling gap count is a measurement of work done rather than a bar timed to
 look plausible. A progress indicator that is guessing gets found out at exactly
 the wrong moment.
+
+> ⚠️ **The poll is a Route Handler (`feedback-readiness/route.ts`), not the
+> `loadFeedbackReadiness` Server Action** — the app's one route handler, and it
+> exists for this reason. Server Actions run through a single queue, so a Server
+> Action polled beside the minute-long draft action sits behind it and only reports
+> once the draft is already done, making the bar jump 0 → full. A route handler is
+> fetched directly and runs concurrently. It is still the BFF: it goes through
+> `apiGet` and re-checks the role with `requireTeacher()`.
 
 ### 10.5 Publishing can now be refused
 

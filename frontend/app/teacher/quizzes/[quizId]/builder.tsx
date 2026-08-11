@@ -1,6 +1,6 @@
 "use client";
 
-import { FileQuestion, Library, Pencil, PenLine, Plus, Trash2 } from "lucide-react";
+import { FileJson, FileQuestion, Library, Pencil, PenLine, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useActionState, useState, useTransition } from "react";
 
@@ -30,6 +30,7 @@ import {
 } from "./actions";
 import { BankPicker } from "./bank-picker";
 import { FeedbackPanel } from "./feedback-panel";
+import { ImportPanel } from "./import-panel";
 import { QuestionList } from "./question-list";
 import { QuestionRow } from "./question-row";
 
@@ -44,7 +45,7 @@ import { QuestionRow } from "./question-row";
  */
 
 /** Which panel the [+] button opened, if any. */
-type AddMode = "write" | "bank" | null;
+type AddMode = "write" | "bank" | "import" | null;
 
 export function QuizBuilder({
   quiz,
@@ -357,6 +358,13 @@ export function QuizBuilder({
               >
                 Add from a bank
               </PathTab>
+              <PathTab
+                active={addMode === "import"}
+                icon={FileJson}
+                onClick={() => setAddMode("import")}
+              >
+                Import JSON
+              </PathTab>
             </div>
 
             {addMode === "write" ? (
@@ -367,7 +375,7 @@ export function QuizBuilder({
                 addToQuiz={{ quizId: quiz.id, order: order.length }}
                 onDone={() => setAddMode(null)}
               />
-            ) : (
+            ) : addMode === "bank" ? (
               <BankPicker
                 quizId={quiz.id}
                 topicId={quiz.topic}
@@ -376,6 +384,13 @@ export function QuizBuilder({
                 nextOrder={order.length}
                 initialResults={pickable}
                 initialTotal={pickableTotal}
+                onDone={() => setAddMode(null)}
+              />
+            ) : (
+              <ImportPanel
+                quizId={quiz.id}
+                banks={banks}
+                defaultBankId={defaultBank.id}
                 onDone={() => setAddMode(null)}
               />
             )}

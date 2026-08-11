@@ -377,7 +377,7 @@ cd frontend && npm run dev
 ### Backend
 
 ```bash
-python manage.py test                # all 195 tests (needs the database up)
+python manage.py test                # all 208 tests (needs the database up)
 python manage.py test attempts       # one app
 python manage.py makemigrations      # after changing a model
 python manage.py migrate
@@ -491,7 +491,21 @@ No extra process. Nothing runs beside the three in §8: drafting is a request a
 teacher makes from the quiz builder, never a background worker and never anything
 that happens while a student is submitting.
 
-### 11.1 Getting a key
+### 11.1 Choosing a provider
+
+Drafting runs behind a pluggable provider, chosen by one setting:
+
+```ini
+# Defaults to Gemini when unset. A dotted path to any class with a
+# generate(prompt, schema, timeout) method.
+AI_FEEDBACK_PROVIDER=feedback.providers.gemini.GeminiProvider     # default
+# AI_FEEDBACK_PROVIDER=feedback.providers.deepseek.DeepSeekProvider
+```
+
+Each provider owns its own key, model and endpoint, so switching is this one line
+plus the block below for whichever you picked. Pick **one** and set its key.
+
+### 11.2 Option A — Gemini (default)
 
 1. Sign in at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and
    create a key.
@@ -527,7 +541,36 @@ AI_FEEDBACK_ENABLED=true
 > bundle, which for an API key means publishing it. `frontend/.env.local` needs
 > nothing.
 
-### 11.2 Check your key's actual limits
+### 11.3 Option B — DeepSeek (or any OpenAI-compatible endpoint)
+
+DeepSeek speaks the OpenAI wire format, so the same provider works against
+DeepSeek's own API or against a self-hosted **vLLM / LiteLLM proxy**. Point the
+provider setting at it and set the key:
+
+```ini
+AI_FEEDBACK_PROVIDER=feedback.providers.deepseek.DeepSeekProvider
+DEEPSEEK_API_KEY=your-key-here
+AI_FEEDBACK_ENABLED=true
+
+# Both have working defaults — set them only to override.
+# DEEPSEEK_MODEL=deepseek-chat
+# DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+For DeepSeek's own hosted API, `DEEPSEEK_API_KEY` alone is enough — the base URL
+and `deepseek-chat` model default. To use a proxy instead, set `DEEPSEEK_BASE_URL`
+to its `/v1` URL and `DEEPSEEK_MODEL` to the exact alias that endpoint serves.
+
+> A LiteLLM proxy names its allowed models in the 403 it returns for a wrong one,
+> which is the quickest way to discover the right `DEEPSEEK_MODEL`. Use
+> `deepseek-chat` (V3) rather than `deepseek-reasoner` (R1): R1 ignores
+> `temperature` and its JSON support is narrower.
+
+The rest of this section is written around Gemini's free tier, but the shape of it
+— one call per question, a per-minute quota that bites first, `--fake` to check the
+plumbing for free — is identical whichever provider you chose.
+
+### 11.4 Check your key's actual limits
 
 Open the rate-limits page in AI Studio and read the row for the model you set.
 The free tier is small enough to matter: at the time of writing, `gemini-2.5-flash`
@@ -549,7 +592,7 @@ These are not the same knob. Concurrency is how many workers there are; RPM is t
 quota, enforced on the calls themselves, so raising concurrency alone can never
 breach it.
 
-### 11.3 Running without spending anything
+### 11.5 Running without spending anything
 
 Three separate guarantees, in order of how much you have to remember:
 
@@ -559,7 +602,7 @@ Three separate guarantees, in order of how much you have to remember:
 | **`--fake`** | `python manage.py draft_feedback --quiz N --fake` exercises the whole path — payload, validation, writes — with no API call. |
 | **`AI_FEEDBACK_ENABLED=false`** | The default. Endpoints answer 503 with a clear message; nothing else changes. |
 
-### 11.4 Tuning the prompt before you rely on it
+### 11.6 Tuning the prompt before you rely on it
 
 The wording in `feedback/prompts.py` is the only thing that decides whether the
 output is any good, and nothing downstream depends on it — no model field, no
@@ -576,13 +619,15 @@ see whether the topic prompt is actually changing the voice.
 
 Add `--write` when you are happy, or use the **Draft** button on the quiz builder.
 
-### 11.5 One thing worth knowing
+### 11.7 One thing worth knowing
 
-On Google's **free** tier, prompts and responses may be used to improve their
-products; paid tiers do not. No student data ever leaves — the payload is the
-topic name, quiz title, question and choices, and student identifiers are excluded
-by construction — but your question content does. Fine for a development project,
-worth knowing deliberately.
+No student data ever leaves, whichever provider you use — the payload is the topic
+name, quiz title, question and choices, and student identifiers are excluded by
+construction — but your question *content* does. What the provider then does with
+it is the provider's policy: on Google's **free** tier, prompts and responses may
+be used to improve their products (paid tiers do not); DeepSeek's hosted API has
+its own terms; a self-hosted vLLM / LiteLLM proxy keeps the content on your own
+infrastructure. Fine for a development project, worth knowing deliberately.
 
 ---
 

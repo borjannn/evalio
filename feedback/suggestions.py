@@ -205,6 +205,35 @@ def suggest_for_question(question):
     return _run([(question, choices, needing)], topic=topic, quiz=None)[0]
 
 
+def suggest_for_choice(question, choice_id):
+    """Draft a single wrong choice of one question, and **write nothing**.
+
+    The per-field Suggest button. Same one-call machinery as
+    `suggest_for_question`, but the payload asks for exactly one explanation
+    instead of every wrong one — which keeps each click cheap on a metered key
+    rather than re-drafting the whole question every time a teacher presses a
+    different field's button.
+
+    The whole question is still sent as context (the model cannot say *why* a
+    choice is wrong without seeing what right looks like), but `needing` is the one
+    id, so the response and its validation are scoped to that choice.
+
+    An id that is not this question's, or is the correct choice, yields an empty
+    draft rather than an error: there is by definition nothing to explain on a
+    choice that has no explanation, and refusing to draft a foreign id is the same
+    ownership boundary the caller already passed to reach this question.
+    """
+    topic = question.question_bank.topic
+    choices = list(question.choices.all())
+    target = next(
+        (choice for choice in choices if choice.id == choice_id and not choice.is_correct),
+        None,
+    )
+    if target is None:
+        return QuestionDraft(question_id=question.id)
+    return _run([(question, choices, [choice_id])], topic=topic, quiz=None)[0]
+
+
 @dataclass
 class BulkResult:
     generated: int = 0

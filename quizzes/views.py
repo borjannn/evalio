@@ -1,12 +1,14 @@
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery
+from django.db.models import Count, IntegerField, Max, OuterRef, Prefetch, Q, Subquery
 from django.db.models.functions import Coalesce
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from .imports import QuestionImportError, parse_import
 from .models import Question, QuestionBank, Quiz, QuizQuestion, Topic
 from .permissions import IsOwner, IsTeacher, IsTopicOwner
 from .serializers import (
@@ -21,6 +23,20 @@ from .serializers import (
     QuizTeacherListSerializer,
     TopicSerializer,
 )
+
+
+def _first_error(detail):
+    """The first human-readable string out of a DRF error detail, however nested.
+
+    A serializer rejection during import (a field the pure validator does not cover,
+    like an over-long question) arrives as a nested dict/list. The import surfaces
+    one sentence per bad question, so this reaches in and pulls the first one.
+    """
+    if isinstance(detail, dict):
+        return next((_first_error(value) for value in detail.values()), "invalid.")
+    if isinstance(detail, list):
+        return _first_error(detail[0]) if detail else "invalid."
+    return str(detail)
 
 
 def questions_with_usage():
@@ -267,7 +283,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
         permission_classes=[IsTeacher, IsTopicOwner],
     )
     def suggest_feedback(self, request, pk=None):
-        """POST /api/questions/{id}/suggest-feedback/ — draft this question's wrong choices.
+        """POST /api/questions/{id}/suggest-feedback/ — draft wrong-choice explanations.
 
         Returns drafts **without writing them**. The teacher is looking straight at
         the field when they press Suggest, so the draft belongs in their hands to
@@ -275,15 +291,35 @@ class QuestionViewSet(viewsets.ModelViewSet):
         for no benefit. Accepting one is the ordinary `PATCH /api/questions/{id}/`
         nested write, which already diffs choices by id — no new write endpoint.
 
+        An optional `choice_id` in the body narrows the draft to one choice — the
+        per-field button — instead of every wrong choice. One call either way; the
+        difference is how many explanations the one call asks for, which is what
+        keeps a per-field click cheap on a metered key.
+
         `get_object()` runs against the ownership-filtered queryset, so another
         teacher's question is a 404 here exactly as it is everywhere else.
         """
         from feedback.providers import ProviderUnavailable
-        from feedback.suggestions import suggest_for_question
+        from feedback.suggestions import suggest_for_choice, suggest_for_question
 
         question = self.get_object()
+
+        raw_choice_id = request.data.get("choice_id")
+        choice_id = None
+        if raw_choice_id is not None:
+            try:
+                choice_id = int(raw_choice_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "choice_id must be an integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         try:
-            draft = suggest_for_question(question)
+            if choice_id is not None:
+                draft = suggest_for_choice(question, choice_id)
+            else:
+                draft = suggest_for_question(question)
         except ProviderUnavailable as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
@@ -541,6 +577,97 @@ class QuizViewSet(viewsets.ModelViewSet):
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="import-questions",
+        permission_classes=[IsTeacher, IsOwner],
+    )
+    def import_questions(self, request, pk=None):
+        """POST /api/quizzes/{id}/import-questions/ — create questions from JSON, add them.
+
+        All-or-nothing: every question is validated and created, and a `QuizQuestion`
+        links each to the quiz in order, or nothing is written. A single malformed
+        question fails the whole import with its position named — a half-imported
+        quiz the builder then reports as finished is worse than a clean refusal.
+
+        Validation (`quizzes/imports.py`) is pure and runs first, so a bad payload is
+        rejected before any row is written. Creation then reuses
+        `QuestionTeacherSerializer`, so the import inherits the form's rules —
+        `ai_feedback_text` stays read-only, choices will diff by id on later edits —
+        and the pure validator adds the one the serializer does not carry: exactly
+        one correct choice.
+
+        Questions are filed in a bank in this quiz's topic: an existing `bank` id, or
+        a `new_bank_name` created in the same transaction so a later failure cannot
+        orphan it.
+        """
+        quiz = self.get_object()
+
+        # Validate the whole payload before touching the database.
+        try:
+            questions_data = parse_import(request.data.get("questions"))
+        except QuestionImportError as exc:
+            return self._import_error(exc)
+
+        # Resolve the target bank. An existing id is ownership-checked now (a read);
+        # a new bank is created inside the transaction below.
+        raw_bank_id = request.data.get("bank")
+        new_bank_name = (request.data.get("new_bank_name") or "").strip()
+        existing_bank = None
+        if raw_bank_id is not None:
+            existing_bank = QuestionBank.objects.filter(id=raw_bank_id, topic=quiz.topic).first()
+            if existing_bank is None:
+                # 404-shaped: another topic's bank must not be distinguishable from a
+                # missing one, the same rule the rest of the app follows.
+                return Response(
+                    {"detail": "That question bank is not in this quiz's topic."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        elif not new_bank_name:
+            return Response(
+                {"detail": "Provide 'bank' (an existing id) or 'new_bank_name'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                bank = existing_bank or QuestionBank.objects.create(
+                    topic=quiz.topic, name=new_bank_name
+                )
+                highest = quiz.quizquestion_set.aggregate(highest=Max("order"))["highest"]
+                start = 0 if highest is None else highest + 1
+
+                created_ids = []
+                for offset, data in enumerate(questions_data):
+                    data["question_bank"] = bank.id
+                    serializer = QuestionTeacherSerializer(data=data)
+                    try:
+                        serializer.is_valid(raise_exception=True)
+                    except DRFValidationError as exc:
+                        # A field-level rejection the pure validator does not cover
+                        # (e.g. an over-long text). Re-raised so it too names the
+                        # question and rolls the whole transaction back.
+                        raise QuestionImportError(offset, _first_error(exc.detail)) from exc
+                    question = serializer.save(created_by=request.user)
+                    QuizQuestion.objects.create(quiz=quiz, question=question, order=start + offset)
+                    created_ids.append(question.id)
+        except QuestionImportError as exc:
+            return self._import_error(exc)
+
+        return Response(
+            {"created": len(created_ids), "question_ids": created_ids, "bank": bank.id},
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _import_error(exc):
+        """One import failure, as a 400 that names the question's 1-based position."""
+        return Response(
+            {"detail": f"Question {exc.index + 1}: {exc.message}", "question_index": exc.index},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     @action(detail=True, methods=["get"], permission_classes=[IsTeacher, IsOwner])
     def attempts(self, request, pk=None):

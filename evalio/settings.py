@@ -115,6 +115,14 @@ SIMPLE_JWT = {
 GOOGLE_AI_API_KEY = os.environ.get("GOOGLE_AI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
+# DeepSeek, read only by feedback/providers/deepseek.py. Self-contained the same way
+# the Gemini vars are: a provider owns its key/model/endpoint, so swapping providers
+# is one AI_FEEDBACK_PROVIDER line and never a rename of the shared key. Base URL and
+# model have working defaults, so pasting DEEPSEEK_API_KEY is enough to start.
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
 # Defaults **false**, so a fresh clone, a CI run and a forgotten .env can never
 # spend a token or reach the network by accident. The endpoints answer 503 while
 # it is off rather than failing somewhere deeper and less legibly.

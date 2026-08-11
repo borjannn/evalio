@@ -203,6 +203,45 @@ export async function addQuestionToQuiz(
 }
 
 /**
+ * Import questions from JSON — docs/FRONTEND.md §8.
+ *
+ * The client parses the JSON first, so "that isn't valid JSON" is caught before a
+ * round trip and the array arrives here already structured. The endpoint validates
+ * and creates every question in **one transaction**, so a partial import is
+ * impossible: this returns either a count or a single message naming the offending
+ * question. A new bank is created server-side inside that same transaction, so a
+ * failed import never leaves an empty bank behind.
+ */
+export async function importQuestions(
+  quizId: number,
+  questions: unknown,
+  bank: { id: number } | { newName: string },
+): Promise<{ created?: number; error?: string }> {
+  await requireTeacher();
+
+  const body =
+    "id" in bank
+      ? { questions, bank: bank.id }
+      : { questions, new_bank_name: bank.newName };
+
+  try {
+    const data = await apiPost<{ created: number }>(
+      `/quizzes/${quizId}/import-questions/`,
+      body,
+    );
+    revalidatePath(`/teacher/quizzes/${quizId}`);
+    return { created: data.created };
+  } catch (error) {
+    // 400 names the bad question; 404 is a bank outside this quiz's topic. Both are
+    // shown in the panel rather than thrown, so the pasted JSON is not lost.
+    if (error instanceof ApiError && (error.status === 400 || error.status === 404)) {
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+}
+
+/**
  * Remove from the quiz — **not** delete from the bank.
  *
  * `remove_question` deletes the `QuizQuestion` join row only; the `Question`
