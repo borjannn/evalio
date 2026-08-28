@@ -9,6 +9,7 @@ import type {
   BulkGenerationResult,
   FeedbackMode,
   FeedbackReadiness,
+  ModuleGenerationResult,
   Paginated,
   Quiz,
   TeacherQuestionWithUsage,
@@ -112,6 +113,35 @@ export async function setFeedbackMode(
 }
 
 /**
+ * Toggle a per-student shuffle — question order or choice order — on a quiz.
+ *
+ * Not retroactive the way `feedback_mode` is: the order is computed fresh on every
+ * attempt fetch from the student's attempt id, so turning it on affects only
+ * fetches after the change. A student mid-attempt keeps a stable order because the
+ * seed (their attempt id) does not change; the flag only decides whether that seed
+ * is consulted at all.
+ */
+export async function setQuizShuffle(
+  quizId: number,
+  field: "shuffle_questions" | "shuffle_choices",
+  value: boolean,
+): Promise<{ error: string | null }> {
+  await requireTeacher();
+
+  try {
+    await apiPatch<Quiz>(`/quizzes/${quizId}/`, { [field]: value });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+
+  revalidatePath(`/teacher/quizzes/${quizId}`);
+  return { error: null };
+}
+
+/**
  * Draft every blank wrong choice in the quiz.
  *
  * Partial success is normal and is reported as such — one question failing out of
@@ -157,6 +187,72 @@ export async function generateQuizFeedback(
 export async function loadFeedbackReadiness(quizId: number): Promise<FeedbackReadiness> {
   await requireTeacher();
   return apiGet<FeedbackReadiness>(`/quizzes/${quizId}/feedback-readiness/`);
+}
+
+/**
+ * Assign, reassign, or clear one question's module.
+ *
+ * `POST /quizzes/{id}/set-question-module/` — exactly one of `moduleId` (an existing
+ * module) or `newName` (created inline, matched case-insensitively against the quiz's
+ * existing modules server-side) or `clear` may be given. Mirrors the bank dropdown's
+ * `NEW_BANK` sentinel idiom on the frontend and `import_questions`'s `bank`/
+ * `new_bank_name` exclusive pair on the backend.
+ */
+export async function setQuestionModule(
+  quizId: number,
+  quizQuestionId: number,
+  choice: { moduleId: number } | { newName: string } | { clear: true },
+): Promise<{ error: string | null }> {
+  await requireTeacher();
+
+  const body =
+    "moduleId" in choice
+      ? { quiz_question_id: quizQuestionId, module: choice.moduleId }
+      : "newName" in choice
+        ? { quiz_question_id: quizQuestionId, new_module_name: choice.newName }
+        : { quiz_question_id: quizQuestionId, module: null };
+
+  try {
+    await apiPost(`/quizzes/${quizId}/set-question-module/`, body);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 404)) {
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
+
+  revalidatePath(`/teacher/quizzes/${quizId}`);
+  return { error: null };
+}
+
+/**
+ * Group every ungrouped question in the quiz into modules with one AI call.
+ *
+ * One call for the whole quiz, unlike `generateQuizFeedback` — there is nothing to
+ * poll progress on, so this returns as soon as the request completes. Only questions
+ * with no module yet are written; a teacher's manual assignment is never overwritten.
+ */
+export async function generateQuizModules(
+  quizId: number,
+): Promise<{ result?: ModuleGenerationResult; error?: string }> {
+  await requireTeacher();
+
+  try {
+    const result = await apiPost<ModuleGenerationResult>(
+      `/quizzes/${quizId}/generate-modules/`,
+      {},
+    );
+    revalidatePath(`/teacher/quizzes/${quizId}`);
+    return { result };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 503) {
+        return { error: "AI drafting is switched off on the server." };
+      }
+      return { error: error.formMessage };
+    }
+    throw error;
+  }
 }
 
 export async function deleteQuiz(formData: FormData): Promise<void> {

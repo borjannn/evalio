@@ -153,7 +153,8 @@ group membership would add a join to every permission check.
 
 ```
 Topic ──┬── QuestionBank ── Question ── Choice
-        └── Quiz ── QuizQuestion ──┘  (many-to-many, ordered)
+        └── Quiz ──┬── QuizQuestion ──┘  (many-to-many, ordered)
+                    └── QuizModule ────── QuizQuestion.module  (optional, per-quiz)
 ```
 
 **`Topic`** — a subject. `name`, `description`, `created_by`, timestamps.
@@ -186,8 +187,63 @@ it to a student would identify the correct answer by elimination.
 leaves existing attempts and their feedback intact. It only controls whether
 assigned students can see and start it.
 
+`shuffle_questions` and `shuffle_choices` (both default `false`) turn on
+**per-student** randomisation of, respectively, the question order and the choice
+order within each question. They are presentation flags, not stored reorders — see
+"Per-student order" below.
+
 **`QuizQuestion`** — the join row. Carries `order` (0-based), unique on
-`(quiz, question)`, ordered by `order`.
+`(quiz, question)`, ordered by `order`. This is the **canonical** order: what the
+builder shows, and what a student sees when `shuffle_questions` is off. Also carries
+`module` (nullable FK to `QuizModule`, `SET_NULL`).
+
+**`QuizModule`** — a named grouping of a quiz's questions, for the per-module quick
+feedback described in §7. `quiz`, `name` (unique per quiz, case-insensitively — a
+`UniqueConstraint` on `Lower("name")` plus `quiz`), `created_at`. Deliberately scoped
+to **one quiz**, not to a topic or reused across a topic's other quizzes: the same
+shared `Question` can belong to a different module in a different quiz's curriculum,
+so the assignment lives on `QuizQuestion` rather than on `Question` — the identical
+reasoning that already puts `order` there instead. No parent/child tree: an earlier
+`Module` model had one and was removed (migration `quizzes.0003`) in favour of named
+`QuestionBank`s; this is a narrower, unrelated concept and does not reintroduce that
+hierarchy.
+
+### Per-student order (`shuffle_questions` / `shuffle_choices`)
+
+When a shuffle flag is on, the order a student sees is computed at delivery time in
+`QuizDetailStudentSerializer`, **seeded by that student's open attempt id**:
+
+- `QuizViewSet.retrieve` looks up the student's one open attempt for the quiz (the
+  "one attempt per student per quiz" rule guarantees at most one) and puts its id in
+  the serializer context as `shuffle_seed`. It resolves the same student's
+  `completed_attempt_id` in the same pass and passes both through context, so
+  `QuizDetailStudentSerializer` can emit `open_attempt_id` / `completed_attempt_id`
+  (ids only, no score) — the intro screen mirrors the list card's Not started / In
+  progress / Completed CTA off them instead of always offering Start. The list
+  endpoint gets these two as annotations; the retrieve path can't annotate a single
+  object, so it fetches them here.
+- The serializer shuffles the question rows with `Random(seed)`, and each question's
+  choices with `Random(f"{seed}:{question_id}")` — a fresh generator per axis, so
+  the two shuffles are independent and each question's choices permute on their own.
+- The emitted `order` field is rewritten to the **displayed index** (0..n-1), so the
+  runner's existing sort-by-order reproduces this sequence rather than undoing it.
+
+Consequences that fall out of seeding by the attempt id:
+
+- **Different per student** (different attempts → different seeds).
+- **Stable for the whole attempt** — the id is fixed until submission, so a refresh
+  or a resumed session shows the identical order. This is what keeps a saved answer
+  pointing at the choice the student actually clicked.
+- **Nothing stored.** No permutation table, no migration beyond the two booleans.
+- With **no open attempt** (never started, or already submitted) the seed is `None`
+  and the canonical order stands. The runner redirects submitted attempts to their
+  result, so it never needs a seed it cannot get.
+
+> Order is **presentational and carries no security weight.** `is_correct` and the
+> explanations are absent from the student serializers regardless, and an answer is
+> recorded by choice **id** (with a text snapshot), so a shuffled position changes
+> nothing about scoring or the answer key. Shuffling True/False is allowed and
+> included — the flag makes no exception for two-option questions.
 
 ### Serializers — the teacher/student split
 
@@ -275,6 +331,8 @@ list / create / retrieve / update / partial-update / destroy set.
 | `remove_question/` | POST | `{question_id}` |
 | `import-questions/` | POST | `{questions: [...], bank \| new_bank_name}` — create questions from JSON and add them, in **one transaction**. See below. |
 | `reorder/` | POST | `{question_ids: [...]}` — sets every question's order in **one atomic call**. Must name exactly the questions currently in the quiz. |
+| `set-question-module/` | POST | `{quiz_question_id, module \| new_module_name}` — assign, create-inline, or (both fields absent) clear one question's module. See §7. |
+| `generate-modules/` | POST | Group every question with no module yet into modules, in **one AI call** for the whole quiz. See §7. |
 | `attempts/` | GET | Every attempt on this quiz (paginated) |
 | `results/` | GET | The whole results screen in one response — see below |
 | `audience/` | GET | Who this quiz's assignments reach, deduplicated, with the route for each |
@@ -525,12 +583,13 @@ for their own attempt. `AnswerResponseSerializer.is_correct` returns `None` unti
 
 ```python
 class FeedbackResult(models.Model):
-    attempt       = OneToOneField(QuizAttempt, related_name="feedback")
-    feedback_text = TextField(blank=True)
-    score_percent = FloatField()
-    correct_count = PositiveIntegerField()
-    total_count   = PositiveIntegerField()
-    created_at    = DateTimeField(auto_now_add=True)
+    attempt              = OneToOneField(QuizAttempt, related_name="feedback")
+    feedback_text        = TextField(blank=True)
+    module_feedback_text = TextField(blank=True, default="")
+    score_percent        = FloatField()
+    correct_count        = PositiveIntegerField()
+    total_count           = PositiveIntegerField()
+    created_at            = DateTimeField(auto_now_add=True)
 ```
 
 ### The service (`feedback/services.py`)
@@ -566,6 +625,86 @@ leaving acronyms and proper nouns alone.
 > live `Choice`. `feedback/tests.py` asserts that editing or deleting a choice
 > cannot rewrite or destroy a submitted attempt's feedback.
 
+### Per-module quick feedback
+
+A second, shorter passage alongside the one above — `FeedbackResult.module_feedback_text`
+— telling a student how they did **per module** ("You did excellent with Water
+Geography. You could improve on City Geography."), built by `generate_feedback` in
+the same pass, from `AnswerResponse.module_name` (a fourth snapshot field, populated
+in `save()` exactly like `question_text`/`choice_text` — see §4 for `QuizModule` and
+`QuizQuestion.module`).
+
+```python
+MODULE_EXCELLENT_THRESHOLD = 80  # percent, inclusive
+MODULE_STRUGGLED_THRESHOLD = 50  # percent, exclusive upper bound
+```
+`>= 80` → "You did excellent with X.", `50–79` → "You could improve on X.",
+`< 50` → "You struggled with X." — fixed constants, the same tuning philosophy as
+`LINKING_PHRASES`, joined with the identical linking-word mechanism. No per-topic or
+per-quiz configuration.
+
+Only questions the student **answered** contribute to a module's score: no
+`AnswerResponse` row exists at all for a question they never touched, so an
+unanswered moduled question cannot be counted — a narrower, deliberate semantics than
+the overall score, which counts an unanswered question as wrong against the total. A
+quiz using no modules, or a student who answered nothing that had one, gets `""`, and
+the frontend renders nothing.
+
+Snapshot discipline is identical to the main passage: renaming or deleting a
+`QuizModule` after a student submits must not change what they already saw, and does
+not — `_module_feedback` reads only `AnswerResponse.module_name`, never the live
+`QuizQuestion.module`, so `rebuild_feedback_for_quiz` (the `feedback_mode` toggle's
+retroactive rebuild) reproduces the same passage regardless of later module edits.
+
+#### Grouping questions into modules with AI
+
+`feedback/module_grouping.py` — one AI call for the **whole quiz**, not one per
+question: the question list fits in a single prompt, so unlike per-choice drafting
+there is no `RateLimiter`/`ThreadPoolExecutor` fan-out, and nothing to poll progress
+on (though it does get **three attempts**, not one retry like `_draft_one` — a single
+cheap call can afford a few extra rolls, and the observed failure mode is as often a
+model that stopped early as a transient error). It reuses the per-choice drafting
+feature's provider machinery wholesale — the same
+`AI_FEEDBACK_PROVIDER`/`AI_FEEDBACK_ENABLED`/`AI_FEEDBACK_TIMEOUT` settings, the same
+`get_provider()`/`ProviderError`/`ProviderUnavailable`, the same
+`<question_payload>`-wrapped prompt convention (so `FakeProvider` and
+`payload_from_prompt` need no new tag).
+
+> ⚠️ **The response is a plain JSON *object* mapping module name → the question ids
+> in it** — `{"Water Geography": [12, 7, 3], "City Geography": [4, 9]}` —
+> `MODULE_RESPONSE_SCHEMA`'s `type` is `"object"`, not `"array"`. This is deliberate
+> and was learned the hard way: an earlier schema asked for an *array* of
+> `{module, question_ids}` objects, and OpenAI-compatible `response_format={"type":
+> "json_object"}` mode forces a model's top-level output to be an object. Live
+> against Qwen this left "how do I fit an array inside the required object" open,
+> and the model resolved it inconsistently — sometimes wrapping the array under a
+> key, but at least once by discarding every module but the first so the remaining
+> output had a flat, single-object shape, and `--limit 1 --dry-run` against
+> `draft_feedback`-adjacent tooling still returned a 200 with an incomplete grouping.
+> A name → ids map has no such ambiguity: it already **is** the object json_object
+> mode requires, with nothing to wrap or collapse. `_validate_grouping` still applies
+> the same whole-or-nothing check as `suggestions.py::_validate` — every question id
+> in the quiz must appear in exactly one module's list, and no name may be blank or
+> longer than `MODULE_NAME_MAX_LENGTH` (100) — and tolerates exactly one further layer
+> of wrapping (`{"modules": {...}}`) in case a model adds one anyway. `GeminiProvider`
+> and the OpenAI-compatible providers both branch on `schema["type"]` to know whether
+> to expect a list or a dict back; `deepseek.py::_to_entries` is unused for this
+> schema; see below.
+
+Only questions with **no module yet** are written (`write_module_grouping`,
+re-checked inside the transaction the same way `write_ai_feedback` re-checks
+`feedback_text` — a teacher can assign one by hand while the call is in flight). A
+proposed name is matched against the quiz's existing modules **case-insensitively**
+before a new `QuizModule` is created, so a re-run — or the model's own wording —
+cannot fork "Water Geography" and "water geography" into two rows.
+
+`FakeProvider.generate()` branches on the payload's shape (`"question_ids"` present
+→ grouping) and answers deterministically with a name → ids map split across two
+alternating placeholder names, so a test can assert a run actually split questions
+into more than one group.
+
+See §4 for the two endpoints (`set-question-module/`, `generate-modules/`).
+
 ### Endpoints
 
 | Method & path | Access |
@@ -588,7 +727,8 @@ feedback/
 └── providers/
     ├── base.py      # the Protocol, the errors, FakeProvider
     ├── gemini.py    # Google AI Studio (default)
-    └── deepseek.py  # DeepSeek / any OpenAI-compatible endpoint
+    ├── deepseek.py  # DeepSeek / any OpenAI-compatible endpoint
+    └── qwen.py      # Qwen on FINKI's self-hosted vLLM proxy
 ```
 
 Neither provider imports models. `suggestions.py` is the only module that touches
@@ -601,22 +741,36 @@ provider is a new file plus a settings line, with no edit to the pipeline.
 | `AI_FEEDBACK_PROVIDER` | `feedback.providers.gemini.GeminiProvider` | `suggestions.py` |
 | `GOOGLE_AI_API_KEY`, `GEMINI_MODEL` | — / `gemini-2.5-flash` | `gemini.py` only |
 | `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL` | — / `https://api.deepseek.com` / `deepseek-chat` | `deepseek.py` only |
+| `QWEN_API_KEY`, `QWEN_BASE_URL`, `QWEN_MODEL` | — / `https://vllm.finki.ukim.mk` / `qwen3.8-27b` | `qwen.py` only |
 
 Each provider owns its key, model and endpoint, so switching providers never means
 renaming a shared key. The DeepSeek block's base-URL and model defaults are what
 let it point at a self-hosted **vLLM / LiteLLM proxy** (set `DEEPSEEK_BASE_URL` to
 the proxy's `/v1` URL and `DEEPSEEK_MODEL` to the alias it serves) as readily as at
-DeepSeek's own API.
+DeepSeek's own API. `QwenProvider` points at exactly such a proxy by default
+(`QWEN_BASE_URL=https://vllm.finki.ukim.mk`, FINKI's own vLLM host) — it exists
+because a newer model became available there, not because the wire format differs
+from DeepSeek's, and it reuses `deepseek.py::_to_entries` rather than duplicating
+the normaliser below.
 
-> **Why DeepSeek needs a normaliser and Gemini does not.** Gemini consumes the
-> `response_schema` and returns the bare list `_validate` expects. DeepSeek has only
-> JSON *mode* — valid JSON, but constrained to a top-level object and blind to the
-> schema — so open models wrap the list inconsistently. `deepseek.py::_to_entries`
-> flattens all the observed shapes (a bare list, `{"1020": "text", …}` id-keyed
-> maps, a single wrapped array, one un-listed entry) back to
-> `[{choice_id, feedback}]` before `_validate` does the real checking. JSON mode
-> also requires the literal word "json" in the prompt, which `prompts.py` already
-> satisfies — a real coupling, called out in the provider's docstring.
+> **Why DeepSeek (and Qwen) need a normaliser and Gemini does not, for the per-choice
+> feedback call.** Gemini consumes the `response_schema` and returns the bare list
+> `_validate` expects. DeepSeek and Qwen have only JSON *mode* — valid JSON, but
+> constrained to a top-level object and blind to the schema — so open models wrap the
+> list inconsistently. `deepseek.py::_to_entries` flattens all the observed shapes (a
+> bare list, `{"1020": "text", …}` id-keyed maps, that same map wrapped one level
+> deeper under a single key — e.g. `{"feedback": {"1020": "text", …}}`, confirmed live
+> against Qwen — a single wrapped array, one un-listed entry) back to the schema's
+> `[{id_field, value_field}]` shape before `_validate` does the real checking — the
+> field names come from `schema["items"]["required"]` rather than being hardcoded.
+> JSON mode also requires the literal word "json" in the prompt, which `prompts.py`
+> already satisfies — a real coupling, called out in the provider's docstring.
+>
+> `_to_entries` is **not** used for the module-grouping call (§7): that response is
+> object-shaped by design rather than array-shaped, specifically to sidestep the same
+> "how does an array fit inside a required object" ambiguity this normaliser exists
+> to clean up after the fact. Both providers branch on `schema["type"]` in `generate()`
+> to tell the two calls apart.
 
 #### Fields
 

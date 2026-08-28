@@ -8,7 +8,7 @@ import { logout } from "@/lib/actions";
 import type { User } from "@/lib/types";
 
 /**
- * The student shell's header — `Quizzes` · `History` · sign out (docs/FRONTEND.md §6).
+ * The student shell's header — `Quizzes` · `History` · `Guide` · sign out (docs/FRONTEND.md §6).
  *
  * A component the screens render rather than a layout, because docs/FRONTEND.md §6 makes the
  * runner (docs/FRONTEND.md §6) an explicit exception: a student who navigates away mid-attempt
@@ -40,6 +40,7 @@ export function StudentHeader({ user }: { user: User }) {
               Quizzes
             </NavLink>
             <NavLink href="/student/history">History</NavLink>
+            <NavLink href="/student/tutorial">Guide</NavLink>
           </nav>
         </div>
 

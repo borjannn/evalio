@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Topic(models.Model):
@@ -132,6 +133,23 @@ class Quiz(models.Model):
                   "A soft flag — a published quiz stays editable, and un-publishing "
                   "leaves existing attempts and their feedback intact.",
     )
+    # Per-student presentation, not stored order. When on, each student sees the
+    # questions (and/or the choices within each question) in an order randomised
+    # from their own attempt id — different per student, identical on every refresh
+    # of that attempt, and computed at delivery time rather than persisted. The
+    # canonical `QuizQuestion.order` is untouched and is what the builder shows and
+    # what students see when the flag is off. Order carries no security weight:
+    # `is_correct` and the explanations are never sent to a student before they
+    # submit, and answers are recorded by choice id, so shuffling is purely visual.
+    # See `quizzes/serializers.py::QuizDetailStudentSerializer` and docs/BACKEND.md §4.
+    shuffle_questions = models.BooleanField(
+        default=False,
+        help_text="Present the questions in a per-student random order at attempt time.",
+    )
+    shuffle_choices = models.BooleanField(
+        default=False,
+        help_text="Present each question's choices in a per-student random order at attempt time.",
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quizzes")
     questions = models.ManyToManyField(Question, through="QuizQuestion", related_name="quizzes")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -145,10 +163,47 @@ class Quiz(models.Model):
         return self.title
 
 
+class QuizModule(models.Model):
+    """A named grouping of a quiz's questions, for per-module scoring after submission.
+
+    Scoped to one quiz, not shared across quizzes or reused from a topic's other quizzes —
+    the same Question can mean something different in a different quiz's curriculum, so
+    grouping cannot live on Question (see QuizQuestion.module below). Deliberately flat: no
+    parent/child tree. A prior "Module" model had one and was removed (migration
+    quizzes.0003) in favour of named QuestionBanks; this is a narrower, different concept
+    and does not reintroduce that hierarchy.
+    """
+
+    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name="modules")
+    name = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"), "quiz", name="uniq_quizmodule_name_per_quiz_ci"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.quiz})"
+
+
 class QuizQuestion(models.Model):
     quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE)
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
     order = models.PositiveIntegerField(default=0)
+    module = models.ForeignKey(
+        QuizModule,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="quiz_questions",
+        help_text="Which module this question counts toward for per-module feedback. "
+        "Optional — an unassigned question still counts toward the overall score but "
+        "contributes to no module breakdown.",
+    )
 
     class Meta:
         ordering = ["order"]

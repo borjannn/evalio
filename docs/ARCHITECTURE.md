@@ -444,6 +444,22 @@ Honest limits of the current design, so nobody mistakes them for oversights:
 - **CORS is transitional.** `django-cors-headers` still allows `localhost:3000`.
   Under the BFF the browser never calls Django directly, so once nothing depends on
   it the setting and the package can be removed rather than tightened.
+- **Shuffle is per-quiz, not per-question, and unseeded before an attempt exists.**
+  `shuffle_questions` / `shuffle_choices` are quiz-wide flags randomising order
+  per student, deterministically from the student's attempt id — no stored
+  permutation. A teacher cannot exempt one question, and a preview before the
+  student has started falls back to the canonical order because there is no attempt
+  id to seed from. Per-question control would need a field per `QuizQuestion` and a
+  seed source that exists earlier than the attempt. (BACKEND.md §4.)
+- **A module is scoped to one quiz, never reused across a topic's other quizzes.**
+  Unlike a `QuestionBank`, there is no cross-quiz module picker — a question shared
+  by reference into a second quiz starts unassigned there and needs its own module
+  chosen, even if the first quiz already grouped it. Reusing modules across a
+  topic's quizzes would need the model to live on `Topic` instead, at the cost of
+  forcing every quiz in a topic to share one grouping scheme. (BACKEND.md §4, §7.)
+- **A module has no rename or delete UI.** Matches `QuestionBank`, which has none
+  either — a mis-named module is currently fixed by reassigning each question to a
+  freshly created one, not by editing the name in place.
 
 ---
 

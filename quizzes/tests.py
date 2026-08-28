@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
-from .models import Choice, Question, QuestionBank, Quiz, Topic
+from .models import Choice, Question, QuestionBank, Quiz, QuizModule, QuizQuestion, Topic
 
 User = get_user_model()
 
@@ -546,6 +546,99 @@ class StudentQuizListTests(APITestCase):
 
         response = self.client.get("/api/quizzes/")
         self.assertEqual(response.data["results"], [])
+
+
+class StudentQuizDetailAttemptStateTests(APITestCase):
+    """`QuizDetailStudentSerializer` carries this student's attempt ids.
+
+    The intro screen mirrors the list card's Not started / In progress / Completed
+    CTA off these, instead of always offering Start for a quiz already finished
+    (F2). Same precedence as the list's `statusFor`: an open attempt wins over a
+    submitted one. Ids only — a score would break docs/FRONTEND.md §6, this shape being
+    read before the quiz is taken.
+    """
+
+    def setUp(self):
+        from classes.models import QuizAssignment
+
+        self.teacher = make_teacher()
+        self.student = make_student()
+        self.topic = Topic.objects.create(name="Hardware", created_by=self.teacher)
+        bank = QuestionBank.objects.create(topic=self.topic, name="Bank")
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Unit 1", created_by=self.teacher, is_published=True
+        )
+        question = Question.objects.create(
+            question_bank=bank, text="Q0", created_by=self.teacher
+        )
+        self.quiz.quizquestion_set.create(question=question, order=0)
+        QuizAssignment.objects.create(
+            quiz=self.quiz, student=self.student, assigned_by=self.teacher
+        )
+        self.client.force_authenticate(self.student)
+
+    def _detail(self):
+        return self.client.get(f"/api/quizzes/{self.quiz.id}/").data
+
+    def test_not_started_reports_no_attempt(self):
+        data = self._detail()
+        self.assertIsNone(data["open_attempt_id"])
+        self.assertIsNone(data["completed_attempt_id"])
+
+    def test_in_progress_reports_the_open_attempt(self):
+        from attempts.models import QuizAttempt
+
+        attempt = QuizAttempt.objects.create(quiz=self.quiz, student=self.student)
+        data = self._detail()
+        self.assertEqual(data["open_attempt_id"], attempt.id)
+        self.assertIsNone(data["completed_attempt_id"])
+
+    def test_completed_reports_the_submitted_attempt(self):
+        from django.utils import timezone
+
+        from attempts.models import QuizAttempt
+
+        attempt = QuizAttempt.objects.create(
+            quiz=self.quiz, student=self.student, submitted_at=timezone.now()
+        )
+        data = self._detail()
+        self.assertIsNone(data["open_attempt_id"])
+        self.assertEqual(data["completed_attempt_id"], attempt.id)
+
+    def test_open_attempt_wins_over_a_finished_one(self):
+        from django.utils import timezone
+
+        from attempts.models import QuizAttempt
+
+        QuizAttempt.objects.create(
+            quiz=self.quiz, student=self.student, submitted_at=timezone.now()
+        )
+        open_attempt = QuizAttempt.objects.create(quiz=self.quiz, student=self.student)
+        data = self._detail()
+        self.assertEqual(data["open_attempt_id"], open_attempt.id)
+        # The finished one is still reported; the client just prefers the open id.
+        self.assertIsNotNone(data["completed_attempt_id"])
+
+    def test_another_students_attempt_is_not_reported(self):
+        from attempts.models import QuizAttempt
+
+        other = make_student(username="other")
+        QuizAttempt.objects.create(quiz=self.quiz, student=other)
+        data = self._detail()
+        self.assertIsNone(data["open_attempt_id"])
+        self.assertIsNone(data["completed_attempt_id"])
+
+    def test_the_answer_key_is_still_absent_from_the_detail(self):
+        """Adding attempt ids must not widen the shape into correctness."""
+        from attempts.models import QuizAttempt
+
+        QuizAttempt.objects.create(quiz=self.quiz, student=self.student)
+        data = self._detail()
+        for row in data["quiz_questions"]:
+            for choice in row["question"]["choices"]:
+                self.assertNotIn("is_correct", choice)
+                self.assertNotIn("feedback_text", choice)
+                self.assertNotIn("ai_feedback_text", choice)
 
 
 class QuestionReuseCountTests(APITestCase):
@@ -1351,3 +1444,344 @@ class ImportQuestionsTests(APITestCase):
     def test_a_student_cannot_import(self):
         self.client.force_authenticate(self.student)
         self.assertIn(self._post(self.TWO_GOOD, new_bank_name="X").status_code, (403, 404))
+
+
+class PerStudentShuffleTests(APITestCase):
+    """`shuffle_questions` / `shuffle_choices`: per-student order, computed at
+    delivery time and seeded by the open attempt id.
+
+    The guarantees under test are the ones the feature stands or falls on:
+
+    - **Deterministic per attempt.** The same student refreshing mid-quiz must get
+      the identical order every time, or a saved answer would point at the wrong
+      visible choice. The seed is the attempt id, which is fixed until submission.
+    - **Nothing lost.** A shuffle is a permutation — every question and every
+      choice still appears exactly once.
+    - **The emitted `order` is the display index**, so the runner's sort-by-order
+      reproduces this sequence rather than undoing it.
+    - **Still no correctness leak.** Reordering choices must not smuggle
+      `is_correct` or an explanation onto a choice the student sees before
+      submitting — the whole security property is order-independent.
+    """
+
+    def setUp(self):
+        from classes.models import QuizAssignment
+        from quizzes.models import QuizQuestion
+
+        self.teacher = make_teacher()
+        self.student = make_student("s1")
+        self.other = make_student("s2")
+        self.topic = Topic.objects.create(name="T", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="B")
+        self.quiz = Quiz.objects.create(
+            topic=self.topic, title="Q", created_by=self.teacher, is_published=True
+        )
+        # Eight questions of four choices: long enough that a shuffle is visible and
+        # a chance identity permutation is negligible, without any test asserting
+        # "different" (the exact-permutation test below carries that deterministically).
+        self.questions = []
+        for q_index in range(8):
+            question = Question.objects.create(
+                question_bank=self.bank, text=f"Q{q_index}", created_by=self.teacher
+            )
+            for c_index in range(4):
+                Choice.objects.create(
+                    question=question,
+                    text=f"Q{q_index}C{c_index}",
+                    is_correct=(c_index == 0),
+                    feedback_text="" if c_index == 0 else f"why {c_index}",
+                )
+            QuizQuestion.objects.create(quiz=self.quiz, question=question, order=q_index)
+            self.questions.append(question)
+
+        for student in (self.student, self.other):
+            QuizAssignment.objects.create(
+                quiz=self.quiz, student=student, assigned_by=self.teacher
+            )
+
+    def _canonical_rows(self):
+        """The unshuffled serialization (seed=None) — the reference every shuffle
+        is a permutation of. Derived from the serializer rather than assuming the
+        database returns choices in primary-key order without an ORDER BY."""
+        from quizzes.serializers import QuizDetailStudentSerializer
+
+        return QuizDetailStudentSerializer(
+            self.quiz, context={"shuffle_seed": None}
+        ).data["quiz_questions"]
+
+    def _canonical_question_ids(self):
+        return [q.id for q in self.questions]
+
+    def _canonical_choice_ids(self, question_id, rows=None):
+        rows = rows if rows is not None else self._canonical_rows()
+        row = next(r for r in rows if r["question"]["id"] == question_id)
+        return [choice["id"] for choice in row["question"]["choices"]]
+
+    def _start(self, student):
+        self.client.force_authenticate(student)
+        response = self.client.post(
+            "/api/attempts/start/", {"quiz_id": self.quiz.id}, format="json"
+        )
+        return response.data["id"]
+
+    def _fetch(self, student):
+        self.client.force_authenticate(student)
+        return self.client.get(f"/api/quizzes/{self.quiz.id}/").data["quiz_questions"]
+
+    def _question_ids(self, rows):
+        return [row["question"]["id"] for row in rows]
+
+    # ------------------------------------------------------------------ off
+
+    def test_off_by_default_serves_canonical_order(self):
+        self._start(self.student)
+        rows = self._fetch(self.student)
+        self.assertEqual(self._question_ids(rows), self._canonical_question_ids())
+        canonical = self._canonical_rows()
+        for row in rows:
+            served = [choice["id"] for choice in row["question"]["choices"]]
+            self.assertEqual(
+                served, self._canonical_choice_ids(row["question"]["id"], canonical)
+            )
+
+    def test_no_open_attempt_falls_back_to_canonical(self):
+        """The seed is the *open* attempt id; with none, order stays canonical."""
+        self.quiz.shuffle_questions = True
+        self.quiz.shuffle_choices = True
+        self.quiz.save()
+        # Assigned but never started — no open attempt to seed from.
+        rows = self._fetch(self.student)
+        self.assertEqual(self._question_ids(rows), self._canonical_question_ids())
+
+    # ------------------------------------------------------- stable & lossless
+
+    def test_question_shuffle_is_stable_and_lossless(self):
+        self.quiz.shuffle_questions = True
+        self.quiz.save()
+        self._start(self.student)
+
+        first = self._question_ids(self._fetch(self.student))
+        second = self._question_ids(self._fetch(self.student))
+
+        self.assertEqual(first, second, "same attempt must see the same order")
+        self.assertCountEqual(
+            first, self._canonical_question_ids(), "every question appears once"
+        )
+
+    def test_choice_shuffle_is_stable_and_lossless(self):
+        self.quiz.shuffle_choices = True
+        self.quiz.save()
+        self._start(self.student)
+
+        first = self._fetch(self.student)
+        second = self._fetch(self.student)
+
+        canonical = self._canonical_rows()
+        for row_a, row_b in zip(first, second, strict=True):
+            served_a = [choice["id"] for choice in row_a["question"]["choices"]]
+            served_b = [choice["id"] for choice in row_b["question"]["choices"]]
+            self.assertEqual(served_a, served_b)
+            self.assertCountEqual(
+                served_a, self._canonical_choice_ids(row_a["question"]["id"], canonical)
+            )
+
+    def test_emitted_order_is_the_display_index(self):
+        """So the runner's sort-by-order preserves the shuffle instead of undoing it."""
+        self.quiz.shuffle_questions = True
+        self.quiz.save()
+        self._start(self.student)
+        rows = self._fetch(self.student)
+        self.assertEqual([row["order"] for row in rows], list(range(len(rows))))
+
+    # --------------------------------------------------- exact permutation
+
+    def test_matches_an_independently_computed_permutation(self):
+        """Pin the mechanism: the served order is exactly `Random(seed).shuffle`.
+
+        Bypasses the view to control the seed, so this is deterministic rather than
+        relying on whatever attempt id the test database hands out. Also shows the
+        two axes are independent — questions seeded by the attempt, each question's
+        choices seeded by the attempt *and* its id.
+        """
+        from random import Random
+
+        from quizzes.serializers import QuizDetailStudentSerializer
+
+        self.quiz.shuffle_questions = True
+        self.quiz.shuffle_choices = True
+        self.quiz.save()
+
+        seed = 4242
+        data = QuizDetailStudentSerializer(
+            self.quiz, context={"shuffle_seed": seed}
+        ).data
+
+        canonical = self._canonical_rows()
+        expected_questions = self._canonical_question_ids()
+        Random(seed).shuffle(expected_questions)
+        self.assertEqual(
+            self._question_ids(data["quiz_questions"]), expected_questions
+        )
+
+        for row in data["quiz_questions"]:
+            question_id = row["question"]["id"]
+            expected_choices = self._canonical_choice_ids(question_id, canonical)
+            Random(f"{seed}:{question_id}").shuffle(expected_choices)
+            self.assertEqual(
+                [choice["id"] for choice in row["question"]["choices"]],
+                expected_choices,
+            )
+
+    def test_flags_off_ignore_a_present_seed(self):
+        from quizzes.serializers import QuizDetailStudentSerializer
+
+        data = QuizDetailStudentSerializer(
+            self.quiz, context={"shuffle_seed": 4242}
+        ).data
+        self.assertEqual(
+            self._question_ids(data["quiz_questions"]), self._canonical_question_ids()
+        )
+
+    # ------------------------------------------------------------ no leak
+
+    def test_shuffled_choices_still_hide_correctness(self):
+        self.quiz.shuffle_choices = True
+        self.quiz.save()
+        self._start(self.student)
+        rows = self._fetch(self.student)
+        for row in rows:
+            for choice in row["question"]["choices"]:
+                self.assertNotIn("is_correct", choice)
+                self.assertNotIn("feedback_text", choice)
+                self.assertNotIn("ai_feedback_text", choice)
+
+
+class QuizModuleTests(APITestCase):
+    """`set-question-module` — the per-question dropdown's endpoint.
+
+    Mirrors `import_questions`'s bank/new_bank_name exclusive pair: exactly one of an
+    existing id or a new name, a cross-scope id is a 404 (never distinguishable from a
+    missing one), and a module belongs to one quiz only.
+    """
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.topic = Topic.objects.create(name="Geography", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="B")
+        self.quiz = Quiz.objects.create(topic=self.topic, title="Q", created_by=self.teacher)
+        self.question = Question.objects.create(
+            question_bank=self.bank, text="Where is the Nile?", created_by=self.teacher
+        )
+        self.quiz_question = QuizQuestion.objects.create(quiz=self.quiz, question=self.question)
+        self.client.force_authenticate(self.teacher)
+
+    def _set(self, **body):
+        return self.client.post(
+            f"/api/quizzes/{self.quiz.id}/set-question-module/",
+            {"quiz_question_id": self.quiz_question.id, **body},
+            format="json",
+        )
+
+    def test_new_module_name_creates_a_module_scoped_to_the_quiz(self):
+        response = self._set(new_module_name="Water Geography")
+        self.assertEqual(response.status_code, 200)
+        module = QuizModule.objects.get(quiz=self.quiz)
+        self.assertEqual(module.name, "Water Geography")
+        self.quiz_question.refresh_from_db()
+        self.assertEqual(self.quiz_question.module_id, module.id)
+
+    def test_reusing_an_existing_module_id_works(self):
+        module = QuizModule.objects.create(quiz=self.quiz, name="City Geography")
+        response = self._set(module=module.id)
+        self.assertEqual(response.status_code, 200)
+        self.quiz_question.refresh_from_db()
+        self.assertEqual(self.quiz_question.module_id, module.id)
+
+    def test_new_module_name_reuses_an_existing_module_case_insensitively(self):
+        existing = QuizModule.objects.create(quiz=self.quiz, name="Water Geography")
+        response = self._set(new_module_name="water geography")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(QuizModule.objects.filter(quiz=self.quiz).count(), 1)
+        self.quiz_question.refresh_from_db()
+        self.assertEqual(self.quiz_question.module_id, existing.id)
+
+    def test_both_module_and_new_name_is_rejected(self):
+        module = QuizModule.objects.create(quiz=self.quiz, name="City Geography")
+        response = self._set(module=module.id, new_module_name="Something else")
+        self.assertEqual(response.status_code, 400)
+
+    def test_neither_field_clears_the_assignment(self):
+        module = QuizModule.objects.create(quiz=self.quiz, name="City Geography")
+        self.quiz_question.module = module
+        self.quiz_question.save(update_fields=["module"])
+
+        response = self._set()
+        self.assertEqual(response.status_code, 200)
+        self.quiz_question.refresh_from_db()
+        self.assertIsNone(self.quiz_question.module_id)
+
+    def test_quiz_question_from_another_teachers_quiz_is_404(self):
+        intruder = make_teacher("intruder")
+        self.client.force_authenticate(intruder)
+        response = self._set(new_module_name="X")
+        self.assertEqual(response.status_code, 404)
+
+    def test_module_id_from_a_different_quiz_is_404(self):
+        other_quiz = Quiz.objects.create(topic=self.topic, title="Other", created_by=self.teacher)
+        foreign_module = QuizModule.objects.create(quiz=other_quiz, name="Foreign")
+        response = self._set(module=foreign_module.id)
+        self.assertEqual(response.status_code, 404)
+
+
+class ModuleAIGroupingEndpointTests(APITestCase):
+    """`generate-modules` — the bulk AI-grouping button, one call for the whole quiz."""
+
+    def setUp(self):
+        self.teacher = make_teacher()
+        self.topic = Topic.objects.create(name="Geography", created_by=self.teacher)
+        self.bank = QuestionBank.objects.create(topic=self.topic, name="B")
+        self.quiz = Quiz.objects.create(topic=self.topic, title="Q", created_by=self.teacher)
+        self.questions = [
+            Question.objects.create(question_bank=self.bank, text=f"Q{i}", created_by=self.teacher)
+            for i in range(4)
+        ]
+        self.quiz_questions = [
+            QuizQuestion.objects.create(quiz=self.quiz, question=question, order=index)
+            for index, question in enumerate(self.questions)
+        ]
+        self.client.force_authenticate(self.teacher)
+
+    def test_groups_every_question_with_the_fake_provider(self):
+        response = self.client.post(f"/api/quizzes/{self.quiz.id}/generate-modules/", {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["modules_created"], 2)
+        self.assertEqual(response.data["questions_assigned"], 4)
+        self.assertEqual(response.data["skipped_assigned"], 0)
+        assigned = set(
+            QuizQuestion.objects.filter(quiz=self.quiz).values_list("module__name", flat=True)
+        )
+        self.assertEqual(assigned, {"Group A", "Group B"})
+
+    def test_never_overwrites_a_manually_assigned_module(self):
+        mine = QuizModule.objects.create(quiz=self.quiz, name="Mine")
+        self.quiz_questions[0].module = mine
+        self.quiz_questions[0].save(update_fields=["module"])
+
+        response = self.client.post(f"/api/quizzes/{self.quiz.id}/generate-modules/", {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["skipped_assigned"], 1)
+        self.quiz_questions[0].refresh_from_db()
+        self.assertEqual(self.quiz_questions[0].module_id, mine.id)
+
+    def test_disabled_provider_is_503(self):
+        with self.settings(AI_FEEDBACK_ENABLED=False):
+            response = self.client.post(
+                f"/api/quizzes/{self.quiz.id}/generate-modules/", {}, format="json"
+            )
+        self.assertEqual(response.status_code, 503)
+
+    def test_another_teachers_quiz_is_404(self):
+        intruder = make_teacher("intruder")
+        self.client.force_authenticate(intruder)
+        response = self.client.post(f"/api/quizzes/{self.quiz.id}/generate-modules/", {}, format="json")
+        self.assertEqual(response.status_code, 404)

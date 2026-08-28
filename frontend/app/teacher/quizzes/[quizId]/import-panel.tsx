@@ -1,6 +1,6 @@
 "use client";
 
-import { Upload } from "lucide-react";
+import { Check, Copy, Upload } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -29,8 +29,11 @@ import { importQuestions } from "./actions";
 
 const NEW_BANK = "__new__";
 
-const EXAMPLE = `[
-  {
+// Two question shapes the import accepts. `type` defaults to "mc" (multiple
+// choice); "tf" is a true/false question, which the backend requires to have
+// exactly two choices (quizzes/imports.py). Both are shown so a teacher can see
+// that true/false questions exist without reading the docs.
+const MC_QUESTION = `  {
     "text": "What is the capital of France?",
     "type": "mc",
     "choices": [
@@ -38,8 +41,59 @@ const EXAMPLE = `[
       { "text": "Lyon", "correct": false, "feedback": "Lyon is a city, but not the capital." },
       { "text": "Marseille", "correct": false }
     ]
+  }`;
+
+const TF_QUESTION = `  {
+    "text": "The Pacific is the largest ocean on Earth.",
+    "type": "tf",
+    "choices": [
+      { "text": "True", "correct": true },
+      { "text": "False", "correct": false, "feedback": "The Pacific is in fact the largest ocean — bigger than all land combined." }
+    ]
+  }`;
+
+// Each format is a complete, importable array on its own — the copy buttons put
+// exactly this on the clipboard, ready to paste straight back into the box.
+const MC_EXAMPLE = `[\n${MC_QUESTION}\n]`;
+const TF_EXAMPLE = `[\n${TF_QUESTION}\n]`;
+// The in-box example holds one of each so the "Paste an example" fill and the
+// placeholder both make it clear true/false is an option.
+const EXAMPLE = `[\n${MC_QUESTION},\n${TF_QUESTION}\n]`;
+
+/**
+ * A small inline button that copies a JSON format onto the clipboard, matching
+ * the "Paste an example" text-button style. It flips to a check for ~1.5s so the
+ * click has visible feedback; if the clipboard is unavailable (an insecure
+ * context, or the user denied it) it stays silent — the in-box example gives the
+ * same JSON another way.
+ */
+function CopyButton({ label, text }: { label: string; text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard blocked — no-op, deliberately.
+    }
   }
-]`;
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={`Copy ${label} format to clipboard`}
+      // A filled chip, the secondary Button's look at a smaller scale, so it reads
+      // as a button at rest rather than only lighting up on hover.
+      className="pressable inline-flex items-center gap-1.5 rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground hover:bg-secondary/80 hover:shadow-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
 
 export function ImportPanel({
   quizId,
@@ -97,14 +151,25 @@ export function ImportPanel({
   return (
     <Card className="w-full">
       <CardBody className="space-y-5 p-6">
-        <div className="space-y-1">
-          <h3 className="text-base font-medium">Import questions from JSON</h3>
-          <p className="text-sm text-muted-foreground">
-            Paste an array of questions. Each needs <code>text</code>, a{" "}
-            <code>choices</code> array, and exactly one choice marked{" "}
-            <code>&quot;correct&quot;: true</code>. Per-choice <code>feedback</code>{" "}
-            is optional — leave it out and draft it with AI afterwards.
-          </p>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <h3 className="text-base font-medium">Import questions from JSON</h3>
+            <p className="text-sm text-muted-foreground">
+              Paste an array of questions. Each needs <code>text</code>, a{" "}
+              <code>choices</code> array, and exactly one choice marked{" "}
+              <code>&quot;correct&quot;: true</code>. Per-choice <code>feedback</code>{" "}
+              is optional — leave it out and draft it with AI afterwards. Add{" "}
+              <code>&quot;type&quot;: &quot;tf&quot;</code> for a true/false question
+              (exactly two choices); <code>type</code> defaults to multiple choice.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="mr-1 text-xs text-muted-foreground">
+              Copy a format:
+            </span>
+            <CopyButton label="Multiple choice" text={MC_EXAMPLE} />
+            <CopyButton label="True / false" text={TF_EXAMPLE} />
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -113,7 +178,7 @@ export function ImportPanel({
             <button
               type="button"
               onClick={() => setJson(EXAMPLE)}
-              className="pressable rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="pressable rounded-md bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground hover:bg-secondary/80 hover:shadow-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
               Paste an example
             </button>

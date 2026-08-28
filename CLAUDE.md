@@ -155,6 +155,33 @@ enrollment), verify the parent's owner in `perform_create` — see `classes/view
 the single definition of which quizzes a student may see, used by the quiz list, the quiz retrieve,
 and the attempt-start authorization check. Don't reimplement it inline; those three must agree.
 
+**Per-student shuffle is deterministic, not random-per-request.** `shuffle_questions` /
+`shuffle_choices` reorder a student's questions/choices in `QuizDetailStudentSerializer`, seeded by
+the student's *open attempt id* (`QuizViewSet.retrieve` supplies it as `shuffle_seed`). Seeding by
+the attempt is the whole design: the order is stable for the duration of the attempt, so a saved
+answer keeps pointing at the choice the student clicked. Never re-roll per request (a refresh would
+move the answers) and never move it to submit time. It stores no permutation and the canonical
+`QuizQuestion.order` is untouched. Order is presentational — `is_correct` and the explanations stay
+off the student serializers regardless — so a shuffle is never a place correctness can leak. See
+docs/BACKEND.md §4.
+
+**A `QuizModule` assignment lives on `QuizQuestion`, not on `Question`** — the same reason
+`order` does. A `Question` is shared by reference across quizzes, so a module (a per-quiz
+grouping used for the per-module "quick feedback" summary, `feedback/services.py::_module_feedback`)
+would mean something different in each quiz that reused the question; putting it on the join
+row instead means each quiz's grouping is independent. `AnswerResponse.module_name` is a
+fourth snapshot field alongside `question_text`/`choice_text`/`choice_feedback_text`, for the
+identical reason: a module renamed or deleted after a student submits must not change what
+they already read. `feedback/module_grouping.py`'s bulk AI grouping call **never overwrites a
+question that already has a module** — the same skip-if-already-set rule `generate_for_quiz`
+applies to `feedback_text` — and reuses the `AI_FEEDBACK_*` settings and provider machinery
+wholesale rather than introducing a parallel settings block. Its response is a plain JSON
+**object** mapping module name to question ids (`{"Water Geography": [12, 7, 3]}`), not an
+array — deliberately, because OpenAI-compatible `response_format={"type": "json_object"}`
+mode forces a model's top-level output to be an object, and an earlier array-shaped schema
+left the model free to (and it did, live against Qwen) collapse multiple modules down to
+whichever shape happened to fit. See docs/BACKEND.md §4 and §7.
+
 Registration always creates a student. Teacher accounts are made via `createsuperuser` plus the
 admin. Don't restore a client-supplied `role`.
 
@@ -352,6 +379,16 @@ merged into one "done" number, and the mode switch states its retroactive conseq
 Bulk progress polls `feedback-readiness/` because generation persists each question as it lands, so
 the number is measured; don't replace it with a timed bar.
 
+**The per-question module dropdown reuses the bank dropdown's exact "choose existing or create
+inline" idiom** — the same `NEW_BANK`-style sentinel, the same shared `Select`/`Input`
+primitives — but lives in `question-row.tsx` (`module-picker.tsx`), not inside `QuestionForm`,
+because a module is a property of *this quiz's* `QuizQuestion` rather than of the shared
+`Question`, so it needs no edit session: a change commits immediately, optimistic like the
+shuffle switches, and reverts on error. The bulk "Group with AI" button
+(`modules-panel.tsx`) is one call for the whole quiz, so unlike feedback drafting it has no
+readiness endpoint and no polling loop — the unassigned count is already in the questions
+already on screen, and the response returns synchronously.
+
 The student shell (`components/student-header.tsx`) is a component the screens render, not a layout
 — the runner is an explicit exception to the nav (docs/FRONTEND.md §6) and a page cannot opt out of a
 layout. The alternative was a `(shell)` route group putting `attempts/[attemptId]` in two places in
@@ -415,7 +452,7 @@ Frontend: `npm run lint` and `npm run typecheck` from `frontend/`.
 
 ## Testing
 
-208 tests across six apps. Run the suite before finishing any backend change. It takes ~10 minutes,
+216 tests across six apps. Run the suite before finishing any backend change. It takes ~10 minutes,
 so `--keepdb` is worth it while iterating, and `--noinput` avoids the "delete the existing test
 database?" prompt hanging forever on a non-interactive stdin.
 
@@ -438,6 +475,10 @@ python manage.py test attempts     # one app
   quizzes that share a question. The N+1 guard on the quiz detail asserts that a
   2-question and an 8-question quiz cost the **same** number of queries, not an exact count — an
   exact number breaks on any unrelated change, and the invariant that matters is "doesn't grow".
+  `PerStudentShuffleTests` covers the per-student order: canonical when off, deterministic and
+  lossless per attempt, the emitted `order` being the display index, a missing open attempt falling
+  back to canonical, and that shuffled choices still hide correctness. It pins the exact permutation
+  against an independently seeded `Random`, so the mechanism can't silently drift.
 - `classes/tests.py` — the assignment target constraints (including the partial unique indexes),
   assignment resolution through class and group, scoped student search, and that
   `assignment_audience` (who a quiz reaches) agrees with `quizzes_assigned_to` (what a student may

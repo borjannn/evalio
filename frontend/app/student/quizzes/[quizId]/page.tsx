@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -41,6 +42,13 @@ export default async function QuizIntro({
   }
 
   const count = quiz.quiz_questions.length;
+  const openId = quiz.open_attempt_id;
+  const completedId = quiz.completed_attempt_id;
+
+  // Same button-as-link string the quiz-list card uses (docs/FRONTEND.md §5/§7), so
+  // the intro's Resume / View feedback CTA looks identical to the list's.
+  const linkButtonClass =
+    "pressable inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:translate-y-px active:scale-[0.99]";
 
   return (
     <StudentShell user={user}>
@@ -67,32 +75,66 @@ export default async function QuizIntro({
               </Badge>
             </div>
 
-            <p className="text-sm text-muted-foreground">
-              Your answers save as you go, and you can change them until you submit.
-              You&apos;ll get an explanation of anything you get wrong.
-            </p>
+            {/* The intro is reachable directly (bookmark, back button, typed URL)
+                after a quiz is started or finished, so it mirrors the list card's
+                Not started / In progress / Completed CTA (docs/FRONTEND.md §7) rather than
+                always offering Start. `open_attempt_id`/`completed_attempt_id` now
+                ride on the student detail shape (`QuizViewSet.retrieve`); ids only,
+                no score (docs/FRONTEND.md §6). An open attempt wins over a finished one,
+                exactly as `statusFor` on the list does. */}
+            {openId !== null ? (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  You&apos;ve already started this quiz. Pick up where you left off —
+                  your saved answers are still here.
+                </p>
+                <Link
+                  href={`/student/attempts/${openId}` as Route}
+                  className={linkButtonClass}
+                >
+                  Resume
+                </Link>
+              </div>
+            ) : completedId !== null ? (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  You&apos;ve completed this quiz. Review the feedback for anything
+                  you got wrong.
+                </p>
+                <Link
+                  href={`/student/attempts/${completedId}/result` as Route}
+                  className={linkButtonClass}
+                >
+                  View feedback
+                </Link>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Your answers save as you go, and you can change them until you
+                  submit. You&apos;ll get an explanation of anything you get wrong.
+                </p>
 
-            {/* A form posting to a Server Function: no client component, and it
-                works with JavaScript off. `start/` returns an existing *open*
-                attempt rather than creating a second one, so this is safe to
-                press twice and is really "Resume" for anyone who left mid-quiz
-                (docs/BACKEND.md §6). Once an attempt is submitted the quiz is closed: `start/`
-                answers 409 and `startAttempt` sends them to the result they
-                already have. This screen cannot say so up front — the student
-                quiz *detail* shape carries no attempt state, only the list shape
-                does — but the outcome is coherent either way, and the only route
-                here for a finished quiz is typing the URL. */}
-            <form action={startAttempt}>
-              <input type="hidden" name="quiz" value={quiz.id} />
-              <Button type="submit" disabled={count === 0}>
-                Start quiz
-              </Button>
-            </form>
+                {/* A form posting to a Server Function: no client component, and it
+                    works with JavaScript off. `start/` returns an existing *open*
+                    attempt rather than creating a second one, so this is safe to
+                    press twice (docs/BACKEND.md §6). The completed case is handled above,
+                    but the server guard is still authoritative: if the quiz is
+                    finished by the time this posts, Django answers 409 and
+                    `startAttempt` redirects to the existing result. */}
+                <form action={startAttempt}>
+                  <input type="hidden" name="quiz" value={quiz.id} />
+                  <Button type="submit" disabled={count === 0}>
+                    Start quiz
+                  </Button>
+                </form>
 
-            {count === 0 && (
-              <p className="text-sm text-muted-foreground">
-                This quiz has no questions yet. Check back later.
-              </p>
+                {count === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    This quiz has no questions yet. Check back later.
+                  </p>
+                )}
+              </>
             )}
           </CardBody>
         </Card>

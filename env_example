@@ -25,14 +25,21 @@ GEMINI_MODEL=gemini-3.6-flash
 # Defaults to Gemini when unset.
 #   feedback.providers.gemini.GeminiProvider     (default)
 #   feedback.providers.deepseek.DeepSeekProvider
-# AI_FEEDBACK_PROVIDER=feedback.providers.deepseek.DeepSeekProvider
+#   feedback.providers.qwen.QwenProvider
+AI_FEEDBACK_PROVIDER=feedback.providers.qwen.QwenProvider
 
-# DeepSeek — or any OpenAI-compatible endpoint. Only DEEPSEEK_API_KEY is required
-# for DeepSeek's own API; base URL and model then default to https://api.deepseek.com
-# and deepseek-chat. To point at a self-hosted vLLM or LiteLLM proxy instead, set
-# DEEPSEEK_BASE_URL to its /v1 URL and DEEPSEEK_MODEL to the exact model alias that
-# endpoint serves (a LiteLLM proxy names its allowed models in the 403 it returns
-# for a wrong one). Read only when the provider above points at DeepSeek.
+# Qwen, on FINKI's self-hosted vLLM proxy — the current default above. Only
+# QWEN_API_KEY is required; base URL and model already point at that proxy and its
+# served alias. Read only when the provider above points at Qwen.
+QWEN_API_KEY=
+# QWEN_MODEL=qwen3.8-27b
+# QWEN_BASE_URL=https://vllm.finki.ukim.mk
+
+# DeepSeek — or any other OpenAI-compatible endpoint, including the same vLLM proxy
+# as Qwen above (set DEEPSEEK_BASE_URL to its /v1 URL and DEEPSEEK_MODEL to the
+# alias it serves). Only DEEPSEEK_API_KEY is required for DeepSeek's own API; base
+# URL and model then default to https://api.deepseek.com and deepseek-chat. Read
+# only when the provider above points at DeepSeek.
 DEEPSEEK_API_KEY=
 # DEEPSEEK_MODEL=deepseek-chat
 # DEEPSEEK_BASE_URL=https://api.deepseek.com

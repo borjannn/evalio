@@ -95,7 +95,8 @@ frontend/
 │   │   │   ├── assign/        Assign to class / group / student
 │   │   │   └── results/       Results table + per-attempt review
 │   │   ├── classes/           Class list, roster, group editor
-│   │   └── analytics/         ⭐ The statistics screen
+│   │   ├── analytics/         ⭐ The statistics screen
+│   │   └── tutorial/          Static how-to for the teacher side
 │   │
 │   └── student/
 │       ├── page.tsx           Assigned quizzes
@@ -103,7 +104,8 @@ frontend/
 │       ├── attempts/[attemptId]/
 │       │   ├── runner.tsx     ⭐ Sitting the quiz
 │       │   └── result/        Feedback after submitting
-│       └── history/           Past results
+│       ├── history/           Past results
+│       └── tutorial/          Static how-to for the student side
 │
 ├── components/
 │   ├── ui/                    Primitives — see §5
@@ -111,7 +113,8 @@ frontend/
 │   ├── nav-link.tsx           Header nav item that knows if it is current
 │   ├── error-state.tsx        Recovery UI for error boundaries
 │   ├── question-form.tsx      Shared by the builder and the bank screen
-│   └── student-header.tsx     The student shell (a component, not a layout)
+│   ├── student-header.tsx     The student shell (a component, not a layout)
+│   └── tutorial-step.tsx      Numbered step, shared by both tutorial screens
 │
 └── lib/
     ├── api.ts            ⭐ server-only. The ONLY module that talks to Django
@@ -402,6 +405,22 @@ an explicit exception to the nav, and a page cannot opt out of a layout. The
 alternative was a `(shell)` route group putting `attempts/[attemptId]` in two places
 in the tree to express one difference.
 
+**Question and choice order is server-authored per student** when a quiz has
+`shuffle_questions` / `shuffle_choices` on (BACKEND.md §4). `page.tsx` still sorts
+`quiz_questions` by `order` and the runner renders `question.choices` in array order
+— but that `order` is now the student's shuffled display index, so the sort
+reproduces the sequence the backend chose rather than the teacher's canonical one.
+Nothing about the content boundary changes: order is presentational, and the payload
+still carries no `is_correct` or explanation, so a shuffled position can never become
+a correctness signal.
+
+**`app/student/attempts/[attemptId]/result/page.tsx`'s "no per-question breakdown"
+rule is about per-*question* granularity specifically.** `FeedbackResult.module_feedback_text`
+— a short line rendered above the detailed passage when non-empty — is a deliberate,
+narrower, pre-agreed exception at the *module* level: "you struggled with Water
+Geography" names an area, never which question inside it. It stays plain text, no
+heading, no bullets, for the same reason the passage below it does.
+
 ---
 
 ## 7. Frontend ↔ backend map
@@ -432,16 +451,18 @@ Every route, the guard it applies, and the endpoints it calls.
 | `/teacher/classes` | `GET /api/classes/?page=` · `GET /api/topics/` *(all)* · `GET /api/groups/?school_class=` *(all, per class)* · `POST`/`PATCH`/`DELETE` on classes and groups |
 | `/teacher/classes/[classId]` | `GET /api/classes/{id}/` · `GET /api/enrollments/?school_class=` *(all)* · `GET /api/groups/?school_class=` *(all)* · `GET /api/group-memberships/?group=` *(all, per group)* · `POST /api/enrollments/` · `POST /api/enrollments/invite/` · `DELETE /api/enrollments/{id}/` · `POST`/`DELETE /api/group-memberships/` · `GET /api/students/search/?q=` |
 | `/teacher/analytics` | `GET /api/analytics/?group_by=&…` · `GET /api/topics/` · `/api/quizzes/` · `/api/classes/` · `/api/groups/` *(all four fetched whole — they are `<option>`s)* |
+| `/teacher/tutorial` | *(none — static how-to; still guarded by `requireTeacher()`)* |
 
 ### Student — `requireStudent()` on every page
 
 | Route | Endpoints |
 | --- | --- |
 | `/student` | `GET /api/quizzes/?page=` *(student shape, with attempt state)* |
-| `/student/quizzes/[quizId]` | `GET /api/quizzes/{id}/` *(student shape)* · `POST /api/attempts/start/` |
+| `/student/quizzes/[quizId]` | `GET /api/quizzes/{id}/` *(student shape, with attempt state)* · `POST /api/attempts/start/` |
 | `/student/attempts/[attemptId]` **(runner)** | `GET /api/attempts/{id}/` · `GET /api/quizzes/{id}/` · `POST /api/attempts/{id}/answer/` · `POST /api/attempts/{id}/submit/` |
 | `/student/attempts/[attemptId]/result` | `GET /api/feedback/attempts/{id}/` |
 | `/student/history` | `GET /api/feedback/mine/?page=` |
+| `/student/tutorial` | *(none — static how-to; still guarded by `requireStudent()`)* |
 
 ### Type ↔ serializer correspondence
 
@@ -486,6 +507,31 @@ special cases.
 > ⚠️ **The reorder is committed in `drop`, never in `dragend`.** `dragend` fires on
 > cancel too, so committing there makes Escape reorder the quiz anyway.
 
+**Randomisation is separate from the manual order.** `shuffle-panel.tsx` sits beside
+the feedback panel and holds two switches — *Shuffle question order per student* and
+*Shuffle answer order per student* — each PATCHing one boolean on the quiz
+(`setQuizShuffle`). These are **per-student** presentation flags: the backend
+randomises at attempt time seeded by the student's attempt id (BACKEND.md §4), so
+the drag-ordered list above is still the canonical order and is what a student sees
+when a switch is off. The switches are optimistic (a presentation flag has nothing
+to validate) and re-sync on route revalidation the same way the feedback panel does.
+Unlike the feedback mode they are **not** retroactive — order is recomputed on every
+fetch, and a student mid-attempt keeps a stable order because their seed does not
+change.
+
+**Modules get a picker on every row, not a form field.** `module-picker.tsx` sits in
+`question-row.tsx`'s badge area — a live `<select>`, always visible, styled with the
+same shared `Select`/`Input` primitives as the bank dropdown (`components/question-form.tsx`'s
+`NEW_BANK` idiom), reusing the identical "choose existing or create inline" sentinel
+pattern. It differs from the bank picker in one structural way: a bank is a property
+of the shared `Question`, so it lives in the edit form, while a module is a property
+of *this quiz's* `QuizQuestion` (BACKEND.md §4), so it needs no edit session to change
+— a click commits immediately, optimistic like the shuffle switches, and reverts on
+error. `modules-panel.tsx` sits beside `shuffle-panel.tsx` and holds the bulk "Group
+with AI" button — one call for the whole quiz, so unlike the feedback drafter it
+polls nothing and needs no readiness endpoint; the unassigned count comes straight
+from the questions already on screen.
+
 **Adding questions has three paths, tabs inside one panel:** *Write a question*
 (the shared `question-form.tsx`), *Add from a bank* (`bank-picker.tsx`), and
 *Import JSON* (`import-panel.tsx`). Import is for turning a block of JSON — a
@@ -493,8 +539,12 @@ teacher's own or an LLM's — into questions without typing each choice; it pair
 with feedback drafting, since the import carries answers and the Suggest buttons
 fill the explanations. Invalid JSON is caught client-side with a plain message
 before any request; the server import is all-or-nothing and names the offending
-question, so a paste never half-lands. *Write* is the default tab because a new
-teacher's banks are empty, so bank-first would be a dead end on day one.
+question, so a paste never half-lands. The panel documents the format inline — a
+worked example with one multiple-choice and one true/false question (the latter
+via `"type": "tf"`), plus a *Copy a format* row whose two buttons put a complete,
+importable array for either shape on the clipboard. *Write* is the default tab
+because a new teacher's banks are empty, so bank-first would be a dead end on day
+one.
 
 The header groups four different kinds of control: identity (title, Draft/Published
 badge, rename) on the left, the two read-only side trips (Results, Assign) in a
@@ -636,6 +686,29 @@ three assertions — one per teacher-only member — that each field **on its ow
 rejects the student shape. Without them, deleting `ai_feedback_text?: never` would
 fail nothing, because `is_correct?: never` alone would keep the existing assertion
 red and the leak would ship.
+
+### 10.7 Grouping questions into modules is the same feature, a smaller shape
+
+`modules-panel.tsx` and `module-picker.tsx` reuse this section's whole authoring
+philosophy — the mark-until-edited discipline, the never-overwrite-a-teacher's-own
+rule, the same `Sparkles`/`Spinner` button — but the mechanics are simpler because
+grouping is **one AI call for the whole quiz**, not one per question:
+
+- No readiness endpoint and no polling loop (§10.4 does not apply). The unassigned
+  count is already in `quiz.questions` (`module === null`), and the response comes
+  back synchronously, so `generateQuizModules` is a single `apiPost` + `revalidatePath`.
+- `ai_enabled` is read straight off the `FeedbackReadiness` the builder already
+  fetches for the panel above — same underlying `AI_FEEDBACK_ENABLED` setting, no
+  second fetch.
+- The picker commits per row, not per form: unlike a bank (a property of the shared
+  `Question`, changed inside the edit form), a module is a property of *this quiz's*
+  `QuizQuestion`, so `module-picker.tsx` is a small always-visible control in
+  `question-row.tsx` rather than a field inside `QuestionForm`, and a change is a
+  one-field optimistic PATCH, the same pattern `shuffle-panel.tsx` uses for its
+  switches.
+
+`FeedbackResult` gained `module_feedback_text` (§6), rendered on the result screen
+only when non-empty.
 
 ---
 

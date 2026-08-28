@@ -31,8 +31,13 @@ class ProviderUnavailable(ProviderError):
 class FeedbackProvider(Protocol):
     """Structural type — a provider satisfies this by shape, not by inheritance."""
 
-    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict]:
-        """Return parsed JSON matching `schema`, or raise `ProviderError`."""
+    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict] | dict:
+        """Return parsed JSON matching `schema`, or raise `ProviderError`.
+
+        A list for an array-shaped schema (`RESPONSE_SCHEMA`, the per-choice feedback
+        drafter), a dict for an object-shaped one (`MODULE_RESPONSE_SCHEMA`, the
+        module-grouping call) — `schema["type"]` says which the caller should expect.
+        """
         ...
 
 
@@ -75,8 +80,21 @@ class FakeProvider:
     what came back and validate it" path the real one does.
     """
 
-    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict]:
+    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict] | dict:
         payload = payload_from_prompt(prompt)
+
+        if "question_ids" in payload:
+            # Module grouping: split deterministically across a small fixed set of
+            # names so a test can assert the run actually produced more than one group,
+            # not just that grouping happened at all. A plain {module: [ids]} object,
+            # matching MODULE_RESPONSE_SCHEMA exactly — not a list, since the real
+            # providers return the map directly under JSON-object mode.
+            names = ["Group A", "Group B"]
+            groups: dict[str, list[int]] = {}
+            for index, question_id in enumerate(payload["question_ids"]):
+                groups.setdefault(names[index % len(names)], []).append(question_id)
+            return groups
+
         return [
             {
                 "choice_id": choice_id,

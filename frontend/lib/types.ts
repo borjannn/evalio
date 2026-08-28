@@ -245,6 +245,16 @@ export type Quiz = {
    * they answered); switching back to `"teacher"` rewrites them.
    */
   feedback_mode: FeedbackMode;
+  /**
+   * Per-student presentation, applied at attempt time and seeded by the student's
+   * open attempt id — not a stored reorder. Each student gets their own order,
+   * stable across refreshes of that attempt; the canonical `QuizQuestion.order`
+   * (what the builder shows) is untouched. Order is presentational only —
+   * `is_correct` and the explanations are never sent before submission, so
+   * shuffling cannot leak the answer. See `QuizDetailStudentSerializer`.
+   */
+  shuffle_questions: boolean;
+  shuffle_choices: boolean;
   created_by: number;
   created_at: string;
 };
@@ -304,12 +314,26 @@ export type TeacherQuizListItem = Quiz & {
  */
 export type QuizDetailTeacher = Quiz & {
   questions: QuizBuilderQuestion[];
+  modules: QuizModule[];
 };
+
+/** `QuizModuleSerializer` — a named grouping of a quiz's questions, scoped to one quiz. */
+export type QuizModule = { id: number; name: string };
 
 /** One row in the builder: the question, plus where it sits in this quiz. */
 export type QuizBuilderQuestion = TeacherQuestion & {
   order: number;
   quiz_question_id: number;
+  /** Which QuizModule this question counts toward, or null if unassigned. */
+  module: number | null;
+  module_name: string | null;
+};
+
+/** `POST /api/quizzes/{id}/generate-modules/`. One call for the whole quiz. */
+export type ModuleGenerationResult = {
+  modules_created: number;
+  questions_assigned: number;
+  skipped_assigned: number;
 };
 
 /**
@@ -353,6 +377,13 @@ export type QuizDetailStudent = {
   title: string;
   description: string;
   quiz_questions: { id: number; question: StudentQuestion; order: number }[];
+  /**
+   * This student's attempt state for the quiz, mirroring `StudentQuizListItem`,
+   * so the intro screen adapts its CTA (Resume / View feedback) instead of always
+   * offering Start. Ids only — no score, no correctness (docs/FRONTEND.md §6).
+   */
+  open_attempt_id: number | null;
+  completed_attempt_id: number | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -679,6 +710,11 @@ export type FeedbackResult = {
   quiz_title: string;
   /** Concatenated per-choice explanations, in quiz order, joined with linking phrases. */
   feedback_text: string;
+  /**
+   * A short per-module summary — "You did excellent with X. You struggled with Y." — or
+   * "" when the quiz used no modules, or the student answered nothing that had one.
+   */
+  module_feedback_text: string;
   score_percent: number;
   correct_count: number;
   total_count: number;

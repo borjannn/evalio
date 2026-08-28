@@ -53,7 +53,7 @@ class DeepSeekProvider:
             base_url=settings.DEEPSEEK_BASE_URL,
         )
 
-    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict]:
+    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict] | dict:
         from openai import APIError, APIStatusError
 
         try:
@@ -65,12 +65,14 @@ class DeepSeekProvider:
                 # across every wrong choice in a quiz reads as a template.
                 temperature=0.4,
                 # A feedback call is a few short explanations — a few hundred tokens.
-                # 1024 is a generous ceiling that still caps a runaway: it keeps the
+                # A module-grouping call is a list of module names plus every question
+                # id in the quiz, which can run longer on a large quiz. 2048 is a
+                # generous ceiling for either that still caps a runaway: it keeps the
                 # per-call cost well under the 2000-token budget that 10 req/min
                 # against a 20000 tokens/min key allows, and shorter replies also
                 # finish faster, which is the only throughput lever left once the
                 # endpoint caps you at 2 concurrent requests.
-                max_tokens=1024,
+                max_tokens=2048,
                 # OpenAI SDK timeout is in seconds, like AI_FEEDBACK_TIMEOUT — no
                 # conversion, unlike Gemini's millisecond HttpOptions.
                 timeout=timeout,
@@ -98,52 +100,81 @@ class DeepSeekProvider:
         except json.JSONDecodeError as exc:
             raise ProviderError("DeepSeek returned text that is not valid JSON.") from exc
 
-        return _to_entries(parsed)
+        # Which shape to expect comes from the schema, not a hardcoded assumption.
+        # MODULE_RESPONSE_SCHEMA (module grouping) is a name -> question-ids object —
+        # exactly what JSON-object mode already forces the top level to be, so there is
+        # nothing to unwrap here (`_validate_grouping` tolerates one further layer of
+        # wrapping if the model adds one anyway). RESPONSE_SCHEMA (per-choice feedback)
+        # is an array, and the entry field names come from `schema["items"]["required"]`
+        # rather than being hardcoded, so `_to_entries` stays usable for any
+        # `[{id_field: int, value_field: str}]` shape, not only this one.
+        if schema.get("type") == "object":
+            if not isinstance(parsed, dict):
+                raise ProviderError("The model returned JSON that is not an object.")
+            return parsed
+
+        id_key, value_key = schema["items"]["required"]
+        return _to_entries(parsed, id_key=id_key, value_key=value_key)
 
 
-def _to_entries(parsed):
-    """Normalise a model's JSON into the `[{choice_id, feedback}]` list `_validate` wants.
+def _is_id_map(value):
+    """`{"1020": "text", ...}` — non-empty, every value a string."""
+    return isinstance(value, dict) and value and all(isinstance(v, str) for v in value.values())
+
+
+def _entries_from_id_map(id_map, *, id_key, value_key):
+    entries = []
+    for key, value in id_map.items():
+        try:
+            ident = int(key)
+        except (TypeError, ValueError) as exc:
+            raise ProviderError(f"The model returned a non-numeric id: {key!r}.") from exc
+        entries.append({id_key: ident, value_key: value})
+    return entries
+
+
+def _to_entries(parsed, *, id_key, value_key):
+    """Normalise a model's JSON into the `[{id_key, value_key}]` list `_validate` wants.
 
     JSON mode forces a top-level object, and open models disagree on how to fit an
-    array into one — this endpoint has been seen returning all three of these for
-    the same schema, so all three are flattened here rather than trusted to be
-    consistent:
+    array into one — this endpoint has been seen returning all of these for the same
+    schema, so all are flattened here rather than trusted to be consistent:
 
     - a bare list (the schema followed literally) — returned as-is;
-    - `{"1020": "text", ...}` — a map of choice-id string to feedback, which is what
-      the FINKI DeepSeek model returns for the real prompt;
+    - `{"1020": "text", ...}` — an id-keyed map, which is what the FINKI DeepSeek
+      model returns for the real prompt;
+    - `{"feedback": {"1020": "text", ...}}` — the same id-keyed map, but wrapped one
+      level deeper under a single key, which is what the FINKI Qwen model returns;
     - `{"items": [...]}` — the array wrapped under one key;
-    - `{"choice_id": .., "feedback": ..}` — a single entry not put in a list.
+    - `{id_key: .., value_key: ..}` — a single entry not put in a list.
 
-    This is the only place that knows the entry's field names, and that is fine: the
-    same names are the provider contract (`FakeProvider` produces them too).
-    `_validate` still does the real checking — ids expected, no duplicates, length —
-    so a wrong *value* is still caught downstream; this only fixes the *container*.
+    `_validate`/`_validate_grouping` still does the real checking — ids expected, no
+    duplicates, length — so a wrong *value* is still caught downstream; this only fixes
+    the *container*.
     """
     if isinstance(parsed, list):
         return parsed
 
     if isinstance(parsed, dict):
         # A single entry returned bare rather than in a list.
-        if "choice_id" in parsed and "feedback" in parsed:
+        if id_key in parsed and value_key in parsed:
             return [parsed]
 
-        # {"1020": "text", ...}: id-keyed map. Non-empty and every value a string.
-        if parsed and all(isinstance(value, str) for value in parsed.values()):
-            entries = []
-            for key, value in parsed.items():
-                try:
-                    choice_id = int(key)
-                except (TypeError, ValueError) as exc:
-                    raise ProviderError(
-                        f"DeepSeek returned a non-numeric choice id: {key!r}."
-                    ) from exc
-                entries.append({"choice_id": choice_id, "feedback": value})
-            return entries
+        if _is_id_map(parsed):
+            return _entries_from_id_map(parsed, id_key=id_key, value_key=value_key)
 
-        # {"items": [...]}: the array wrapped under a single key.
+        # A single key wrapping the real payload one level down — either a list
+        # ({"items": [...]}) or an id-keyed map ({"feedback": {"1020": "text", ...}}).
+        if len(parsed) == 1:
+            (inner,) = parsed.values()
+            if isinstance(inner, list):
+                return inner
+            if _is_id_map(inner):
+                return _entries_from_id_map(inner, id_key=id_key, value_key=value_key)
+
+        # Several keys, exactly one of which is a list.
         lists = [value for value in parsed.values() if isinstance(value, list)]
         if len(lists) == 1:
             return lists[0]
 
-    raise ProviderError("DeepSeek returned JSON that is not a list of entries.")
+    raise ProviderError("The model returned JSON that is not a list of entries.")

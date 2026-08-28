@@ -288,16 +288,32 @@ function describe(distribution: Distribution, metric: "score" | "accuracy"): str
   const subject = metric === "score" ? "Each bar counts attempts" : "Each bar counts questions";
   if (total === 0) return `${subject} in a ten-point band.`;
 
-  const peak = distribution.buckets.reduce(
-    (best, count, index) => (count > distribution.buckets[best] ? index : best),
-    0,
-  );
   // Buckets 5..9 are 50–100, which is the only threshold in the app that means
   // anything to everyone reading it.
   const passing = distribution.buckets.slice(5).reduce((sum, count) => sum + count, 0);
   const share = Math.round((passing / total) * 100);
 
-  return `${subject} in a ten-point band. Most fall in ${distribution.labels[peak]}, and ${share}% sit at 50 or above.`;
+  // The shape of the mass. "Most" is a claim about a majority, so only make it
+  // when one band actually holds one. A flat 1/1/1 spread has three bands tied
+  // for tallest; the old code took the lowest-indexed of them and still said
+  // "Most fall in 0–9", which is the opposite of what the chart shows — and, as
+  // the chart's only screen-reader text, the one thing a non-sighted teacher
+  // gets. A tie names no band; a lone tallest band that is only a plurality is
+  // reported as such rather than as "most".
+  const maxCount = Math.max(...distribution.buckets);
+  const tallest = distribution.buckets.filter((count) => count === maxCount).length;
+  let shape: string;
+  if (tallest > 1) {
+    shape = "No single band stands out";
+  } else {
+    const peak = distribution.buckets.indexOf(maxCount);
+    shape =
+      maxCount / total > 0.5
+        ? `Most fall in ${distribution.labels[peak]}`
+        : `${distribution.labels[peak]} is the most common band`;
+  }
+
+  return `${subject} in a ten-point band. ${shape}, and ${share}% sit at 50 or above.`;
 }
 
 /**

@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from quizzes.models import Choice, Question, Quiz
+from quizzes.models import Choice, Question, Quiz, QuizQuestion
 
 
 class QuizAttempt(models.Model):
@@ -58,6 +58,15 @@ class AnswerResponse(models.Model):
         help_text="Snapshot of the chosen choice's AI-drafted explanation. Same exposure "
                   "rule as choice_feedback_text — never serialized to a student.",
     )
+    module_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Snapshot of the quiz-question's module name at answer time, for "
+        "per-module feedback. Blank if the question had no module. Never re-read from "
+        "the live QuizQuestion when rebuilding feedback, for the same reason "
+        "question_text and choice_text aren't.",
+    )
 
     is_correct = models.BooleanField(default=False)
     answered_at = models.DateTimeField(auto_now_add=True)
@@ -78,4 +87,17 @@ class AnswerResponse(models.Model):
             self.choice_ai_feedback_text = self.selected_choice.ai_feedback_text
         if self.question_id and not self.question_text:
             self.question_text = self.question.text
+        if self.question_id:
+            quiz_question = (
+                QuizQuestion.objects.filter(
+                    quiz_id=self.attempt.quiz_id, question_id=self.question_id
+                )
+                .select_related("module")
+                .first()
+            )
+            self.module_name = (
+                quiz_question.module.name
+                if quiz_question and quiz_question.module_id
+                else ""
+            )
         super().save(*args, **kwargs)

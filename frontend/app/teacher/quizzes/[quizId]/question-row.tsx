@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
-import type { QuizBuilderQuestion } from "@/lib/types";
+import type { QuizBuilderQuestion, QuizModule } from "@/lib/types";
 
 import { removeQuestionFromQuiz } from "./actions";
+import { ModulePicker } from "./module-picker";
 import type { DragHandleProps } from "./question-list";
 
 /**
@@ -23,6 +24,7 @@ import type { DragHandleProps } from "./question-list";
 export function QuestionRow({
   quizId,
   question,
+  modules,
   position,
   loadingEdit,
   handle,
@@ -30,6 +32,8 @@ export function QuestionRow({
 }: {
   quizId: number;
   question: QuizBuilderQuestion;
+  /** Every module defined on this quiz, for the picker's option list. */
+  modules: QuizModule[];
   /** 1-based, for display. */
   position: number;
   /** Edit was clicked and the question's reuse counts are still loading. */
@@ -76,11 +80,19 @@ export function QuestionRow({
             <span className="font-medium">{question.text}</span>
           </button>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {/* Bank membership is contextual metadata here — the quiz is the
                 subject, so this is a badge rather than a grouping. */}
             <Badge>{question.question_bank_name}</Badge>
             <Badge>{question.question_type === "mc" ? "Multiple choice" : "True / False"}</Badge>
+            {/* Module, unlike the bank, is a property of this quiz's question — not
+                the shared question — so it gets a live picker rather than a badge. */}
+            <ModulePicker
+              quizId={quizId}
+              quizQuestionId={question.quiz_question_id}
+              modules={modules}
+              moduleId={question.module}
+            />
           </div>
         </div>
 

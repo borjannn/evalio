@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { StudentShell } from "@/components/student-header";
-import { Card, CardBody } from "@/components/ui/card";
 import { ScoreBadge } from "@/components/ui/score-badge";
 import { ApiError, apiGet } from "@/lib/api";
 import { requireStudent } from "@/lib/auth";
 import type { FeedbackResult } from "@/lib/types";
+
+import { DetailedFeedback } from "./detailed-feedback";
 
 /**
  * docs/FRONTEND.md §7 — ★ the feedback. The emotional centre of the product; everything else in
@@ -17,14 +18,18 @@ import type { FeedbackResult } from "@/lib/types";
  *  1. **`feedback_text` is one continuous passage.** The backend joined the
  *     per-choice explanations with linking phrases into prose. Splitting it into
  *     bullets, cards, or per-question chunks destroys what it assembled, so it is
- *     rendered as body copy at a reading measure and nothing else.
+ *     rendered as body copy at a reading measure and nothing else — `detailed-feedback.tsx`
+ *     only condenses how much of that one passage is visible before a click, it never
+ *     restructures it.
  *  2. **No heading above the passage.** Three different messages share this
  *     layout — a normal passage, a fixed congratulation on a perfect score, and a
  *     fixed "your teacher hasn't added explanations yet". A heading like "Your
  *     mistakes" reads absurdly over the first two.
  *  3. **No per-question breakdown, deliberately.** A student is never told which
  *     specific questions they got wrong, only the assembled explanation. Do not
- *     design one in.
+ *     design one in. `module_feedback_text` is a deliberate, narrower, pre-agreed
+ *     exception to this rule at the *module* level, not a question level — it says
+ *     "you struggled with Water Geography", never which question inside it.
  *  4. **The score is context, the passage is the content.** The number is
  *     deliberately not the largest thing on the screen.
  */
@@ -59,16 +64,21 @@ export default async function AttemptResult({
           </div>
         </div>
 
-        <Card>
-          <CardBody className="p-8">
-            {/* max-w-2xl and leading-relaxed put a line at 65–75 characters —
-                docs/FRONTEND.md §5's reading measure. This is the one place in the app
-                set for reading rather than scanning. */}
-            <div className="max-w-2xl space-y-4 text-base leading-relaxed whitespace-pre-line">
-              {result.feedback_text}
-            </div>
-          </CardBody>
-        </Card>
+        {/* The quick, per-module line — a short lead-in read before the fuller
+            explanation below. Bold rather than a Card or a heading, so it still reads
+            as a quick highlight rather than a competing section; omitted entirely
+            when the quiz used no modules or the student answered nothing that had one. */}
+        {result.module_feedback_text && (
+          <p className="max-w-2xl text-base font-semibold text-foreground">
+            {result.module_feedback_text}
+          </p>
+        )}
+
+        {/* max-w-2xl and leading-relaxed put a line at 65–75 characters —
+            docs/FRONTEND.md §5's reading measure. This is the one place in the app
+            set for reading rather than scanning. Condensed with a click-to-expand —
+            see detailed-feedback.tsx. */}
+        <DetailedFeedback text={result.feedback_text} />
 
         <div className="flex flex-wrap items-center gap-4 text-sm">
           <Link

@@ -42,9 +42,8 @@ Rules:
 - Explain the misconception, do not merely state the correct answer.
 - Be encouraging. The student has already got this wrong; the tone is "here is what
   to look at", never "you should have known".
-- Two or three sentences. Never more than four.
+- One sentence or two maximum. Never more than two.
 - Do not mention letters or positions ("option B") — choices are reordered.
-- Do not reveal the correct answer's wording verbatim; describe the idea.
 - Write an entry for every id in choice_ids_needing_feedback, and for no other id.
 - Return only JSON matching the schema.
 {teacher_instructions}
@@ -111,5 +110,85 @@ def build_prompt(payload, *, teacher_instructions=""):
     )
     return SYSTEM_TEMPLATE.format(
         teacher_instructions=block,
+        payload=json.dumps(payload, indent=2, ensure_ascii=False),
+    )
+
+
+# One call for the whole quiz — the model groups every question into a small number of
+# named modules, so a student can later be told how they did per module.
+#
+# A plain object mapping module name -> the question ids in it, not an array of module
+# objects: this is both what the user originally asked for ("a json with objects
+# module: {list of questions}") and the only shape that survives OpenAI-compatible
+# `response_format={"type": "json_object"}` mode intact. That mode forces the model's
+# top-level output to be a JSON *object*; an array-of-{module, question_ids}-objects
+# schema left "how do I fit an array inside the object json_object mode demands" open,
+# and Qwen resolved it inconsistently — sometimes wrapping the array under a key
+# (`{"modules": [...]}`), but at least once by discarding every module but the first
+# so the remaining top-level object had a single, flat shape. A name -> ids map has no
+# such ambiguity: it already **is** the object json_object mode requires, at the top
+# level, with nothing to wrap or collapse.
+MODULE_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": {
+        "type": "array",
+        "items": {"type": "integer"},
+    },
+}
+
+MODULE_SYSTEM_TEMPLATE = """\
+You are helping a teacher organise a quiz into a small number of topic groups ("modules"),
+so a student can be told afterwards how well they did in each area.
+
+Group the questions below into modules: each module is a short name for the skill or
+sub-topic its questions test. Reuse a name from existing_modules whenever a group of
+questions genuinely belongs there rather than inventing a near-duplicate; only create a
+new name when nothing existing fits.
+
+There are exactly {question_count} questions, with ids: {question_id_list}.
+
+Rules:
+- Prefer 2-6 modules for the whole quiz. Do not give every question its own module, and do
+  not put every question in one module unless the quiz is genuinely that narrow.
+- A module name is 2-4 words, title case, and names a topic — never a difficulty
+  ("Hard questions"), never a verdict ("Needs work").
+- Every one of the {question_count} ids listed above must appear in exactly one module's
+  list — none omitted, none repeated, none invented. Before you finish, count the ids
+  across every module you are about to return and confirm the total is {question_count};
+  if it is not, keep grouping until every id is placed.
+- Return a single JSON object whose keys are module names and whose values are the list
+  of question ids in that module — for example:
+  {{"Water Geography": [12, 7, 3], "City Geography": [4, 9]}}
+  This object must have one key for every module you chose — do not return only the
+  first module.
+- Return only JSON matching the schema.
+
+The quiz follows as JSON.
+
+<question_payload>
+{payload}
+</question_payload>
+"""
+
+
+def build_module_payload(quiz, questions, existing_modules):
+    """The JSON block for the module-grouping call.
+
+    Deliberately excludes choices — grouping is about what topic a question tests, not
+    its answer options, so this payload is smaller and cheaper than `build_payload`'s.
+    """
+    return {
+        "quiz": {"title": quiz.title, "description": quiz.description},
+        "questions": [{"id": question.id, "text": question.text} for question in questions],
+        "question_ids": [question.id for question in questions],
+        "existing_modules": [module.name for module in existing_modules],
+    }
+
+
+def build_module_prompt(payload):
+    question_ids = payload["question_ids"]
+    return MODULE_SYSTEM_TEMPLATE.format(
+        question_count=len(question_ids),
+        question_id_list=", ".join(str(question_id) for question_id in question_ids),
         payload=json.dumps(payload, indent=2, ensure_ascii=False),
     )

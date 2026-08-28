@@ -14,6 +14,7 @@ class FeedbackResult(models.Model):
 
     attempt = models.OneToOneField(QuizAttempt, on_delete=models.CASCADE, related_name="feedback")
     feedback_text = models.TextField(blank=True)
+    module_feedback_text = models.TextField(blank=True, default="")
     score_percent = models.FloatField()
     correct_count = models.PositiveIntegerField()
     total_count = models.PositiveIntegerField()

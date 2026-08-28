@@ -13,6 +13,7 @@ class FeedbackResultSerializer(serializers.ModelSerializer):
             "attempt",
             "quiz_title",
             "feedback_text",
+            "module_feedback_text",
             "score_percent",
             "correct_count",
             "total_count",

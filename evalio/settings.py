@@ -123,6 +123,14 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
+# Qwen, read only by feedback/providers/qwen.py — the same self-hosted vLLM proxy
+# DeepSeek can be pointed at, serving a newer model. Own key/base URL/model, same
+# reason as the blocks above: a provider owns its config, so swapping is one
+# AI_FEEDBACK_PROVIDER line.
+QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
+QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", "https://vllm.finki.ukim.mk")
+QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen3.8-27b")
+
 # Defaults **false**, so a fresh clone, a CI run and a forgotten .env can never
 # spend a token or reach the network by accident. The endpoints answer 503 while
 # it is off rather than failing somewhere deeper and less legibly.

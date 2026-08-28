@@ -55,6 +55,7 @@ export default async function TeacherLayout({ children }: LayoutProps<"/teacher"
               </NavLink>
               <NavLink href="/teacher/classes">Classes</NavLink>
               <NavLink href="/teacher/analytics">Statistics</NavLink>
+              <NavLink href="/teacher/tutorial">Guide</NavLink>
             </nav>
           </div>
 

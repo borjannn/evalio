@@ -21,6 +21,7 @@ LINKING_PHRASES = (
     "In addition,",
     "Similarly,",
     "Beyond that,",
+    "Moreover",
     "And finally,",
 )
 
@@ -42,6 +43,11 @@ NO_EXPLANATIONS_TEXT = (
     "explanations for the answers you picked yet."
 )
 
+# Fixed cutoffs for the per-module quick summary, mirroring LINKING_PHRASES above: one
+# documented place to tune, no per-topic/per-quiz configuration.
+MODULE_EXCELLENT_THRESHOLD = 80  # percent, inclusive
+MODULE_STRUGGLED_THRESHOLD = 50  # percent, exclusive upper bound
+
 
 def _join_with_linking_words(explanations):
     """Stitch explanations into one passage, connecting each with a linking phrase."""
@@ -59,6 +65,45 @@ def _join_with_linking_words(explanations):
         passage.append(f"{phrase} {text}")
 
     return " ".join(passage)
+
+
+def _module_phrase(name, percent):
+    if percent >= MODULE_EXCELLENT_THRESHOLD:
+        return f"You did excellent with {name}."
+    if percent >= MODULE_STRUGGLED_THRESHOLD:
+        return f"You could improve on {name}."
+    return f"You struggled with {name}."
+
+
+def _module_feedback(answers, question_ids):
+    """One sentence per module the student engaged with, joined like the main passage.
+
+    Only questions the student actually answered can contribute: a module can only be
+    scored from AnswerResponse snapshots (never the live QuizQuestion), and no
+    AnswerResponse row exists at all for a question the student never answered — so an
+    unanswered moduled question is structurally impossible to count here, unlike the
+    overall score, which counts it as wrong against the total. This is a deliberate,
+    narrower semantics for the module summary ("how did you do on what you attempted"),
+    not an oversight.
+    """
+    totals = {}  # name -> [correct, total], insertion order == first-seen quiz order
+    for question_id in question_ids:
+        answer = answers.get(question_id)
+        if answer is None or not answer.module_name:
+            continue
+        bucket = totals.setdefault(answer.module_name, [0, 0])
+        bucket[1] += 1
+        if answer.is_correct:
+            bucket[0] += 1
+
+    if not totals:
+        return ""
+
+    sentences = [
+        _module_phrase(name, correct / total * 100)
+        for name, (correct, total) in totals.items()
+    ]
+    return _join_with_linking_words(sentences)
 
 
 def generate_feedback(attempt):
@@ -135,10 +180,13 @@ def generate_feedback(attempt):
     else:
         feedback_text = NO_EXPLANATIONS_TEXT
 
+    module_feedback_text = _module_feedback(answers, question_ids)
+
     result, _ = FeedbackResult.objects.update_or_create(
         attempt=attempt,
         defaults={
             "feedback_text": feedback_text,
+            "module_feedback_text": module_feedback_text,
             "score_percent": score_percent,
             "correct_count": correct_count,
             "total_count": total_count,

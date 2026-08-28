@@ -43,7 +43,7 @@ class GeminiProvider:
         self._genai = genai
         self._client = genai.Client(api_key=settings.GOOGLE_AI_API_KEY)
 
-    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict]:
+    def generate(self, *, prompt: str, schema: dict, timeout: float) -> list[dict] | dict:
         from google.genai import errors, types
 
         config = types.GenerateContentConfig(
@@ -96,6 +96,12 @@ class GeminiProvider:
         except json.JSONDecodeError as exc:
             raise ProviderError("Gemini returned text that is not valid JSON.") from exc
 
-        if not isinstance(parsed, list):
+        # Which container to expect comes from the schema, not a hardcoded assumption
+        # — RESPONSE_SCHEMA (per-choice feedback) is an array, MODULE_RESPONSE_SCHEMA
+        # (module grouping) is a name -> question-ids object.
+        if schema.get("type") == "object":
+            if not isinstance(parsed, dict):
+                raise ProviderError("Gemini returned JSON that is not an object.")
+        elif not isinstance(parsed, list):
             raise ProviderError("Gemini returned JSON that is not a list.")
         return parsed

@@ -31,8 +31,10 @@ import {
 import { BankPicker } from "./bank-picker";
 import { FeedbackPanel } from "./feedback-panel";
 import { ImportPanel } from "./import-panel";
+import { ModulesPanel } from "./modules-panel";
 import { QuestionList } from "./question-list";
 import { QuestionRow } from "./question-row";
+import { ShufflePanel } from "./shuffle-panel";
 
 /**
  * ★ The quiz builder — docs/FRONTEND.md §8.
@@ -296,7 +298,7 @@ export function QuizBuilder({
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
-                className="pressable inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-red-50 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="pressable inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <Trash2 size={14} />
                 Delete quiz
@@ -313,6 +315,19 @@ export function QuizBuilder({
         quizId={quiz.id}
         initial={readiness}
         isPublished={quiz.is_published}
+      />
+
+      <ShufflePanel
+        quizId={quiz.id}
+        shuffleQuestions={quiz.shuffle_questions}
+        shuffleChoices={quiz.shuffle_choices}
+      />
+
+      <ModulesPanel
+        quizId={quiz.id}
+        modules={quiz.modules}
+        questions={order}
+        aiEnabled={readiness.ai_enabled}
       />
 
       <Section
@@ -425,6 +440,7 @@ export function QuizBuilder({
                 <QuestionRow
                   quizId={quiz.id}
                   question={question}
+                  modules={quiz.modules}
                   position={index + 1}
                   loadingEdit={loadingEditId === question.id}
                   handle={handle}

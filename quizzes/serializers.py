@@ -1,7 +1,9 @@
+from random import Random
+
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
-from .models import Choice, Question, QuestionBank, Quiz, QuizQuestion, Topic
+from .models import Choice, Question, QuestionBank, Quiz, QuizModule, Topic
 
 
 class ChoiceWriteSerializer(serializers.ModelSerializer):
@@ -143,7 +145,7 @@ class QuizSerializer(serializers.ModelSerializer):
         model = Quiz
         fields = (
             "id", "topic", "title", "description", "is_published", "feedback_mode",
-            "created_by", "created_at",
+            "shuffle_questions", "shuffle_choices", "created_by", "created_at",
         )
         read_only_fields = ("created_by", "created_at")
 
@@ -261,6 +263,12 @@ class QuizStudentListSerializer(serializers.ModelSerializer):
         )
 
 
+class QuizModuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuizModule
+        fields = ("id", "name")
+
+
 class QuizDetailTeacherSerializer(serializers.ModelSerializer):
     """Full quiz details for teachers with all questions and choices.
 
@@ -271,10 +279,11 @@ class QuizDetailTeacherSerializer(serializers.ModelSerializer):
     """
 
     questions = serializers.SerializerMethodField()
+    modules = QuizModuleSerializer(many=True, read_only=True)
 
     def get_questions(self, obj):
         quiz_questions = (
-            obj.quizquestion_set.select_related("question__question_bank")
+            obj.quizquestion_set.select_related("question__question_bank", "module")
             .prefetch_related("question__choices")
             .order_by("order")
         )
@@ -283,6 +292,8 @@ class QuizDetailTeacherSerializer(serializers.ModelSerializer):
                 **QuestionTeacherSerializer(qq.question).data,
                 "order": qq.order,
                 "quiz_question_id": qq.id,
+                "module": qq.module_id,
+                "module_name": qq.module.name if qq.module_id else None,
             }
             for qq in quiz_questions
         ]
@@ -291,27 +302,82 @@ class QuizDetailTeacherSerializer(serializers.ModelSerializer):
         model = Quiz
         fields = (
             "id", "topic", "title", "description", "is_published", "feedback_mode",
-            "questions", "created_by", "created_at",
+            "shuffle_questions", "shuffle_choices", "questions", "modules",
+            "created_by", "created_at",
         )
         read_only_fields = ("created_by", "created_at")
 
 
-class QuizQuestionOrderSerializer(serializers.ModelSerializer):
-    question = QuestionStudentSerializer(read_only=True)
-
-    class Meta:
-        model = QuizQuestion
-        fields = ("id", "question", "order")
-
-
 class QuizDetailStudentSerializer(serializers.ModelSerializer):
-    """What a student sees when starting a quiz: questions, no answers."""
+    """What a student sees when starting a quiz: questions, no answers.
 
-    quiz_questions = QuizQuestionOrderSerializer(source="quizquestion_set", many=True, read_only=True)
+    When `shuffle_questions` / `shuffle_choices` are on, the order is randomised
+    **per student** here rather than in the stored model. The randomness is seeded
+    from `context["shuffle_seed"]` — the student's open attempt id, set by
+    `QuizViewSet.retrieve` — so it is different for each student, identical on every
+    refresh of the same attempt (the id is fixed until submission), and needs no
+    stored permutation. With no seed, or the flag off, the canonical `order` stands.
+
+    Two things make this safe. Order is presentational: `is_correct` and the
+    explanations are absent from `QuestionStudentSerializer`/`ChoiceReadSerializer`,
+    and an answer is recorded by choice id, so a shuffled position changes nothing
+    about scoring or the answer key. And the emitted `order` is rewritten to the
+    *displayed* index, so the runner's existing sort-by-order preserves this
+    sequence instead of undoing it — the sensitive runner file stays untouched.
+
+    The two attempt ids mirror `QuizStudentListSerializer`: they let the intro
+    screen adapt its CTA to Not started / In progress / Completed just like the
+    list card does, instead of always offering "Start quiz" for a quiz the student
+    has already finished. Like the shuffle seed they come from context —
+    `QuizViewSet.retrieve` resolves them — because `retrieve` fetches a single
+    object rather than the annotated list queryset. Still ids only: no score, no
+    correctness (docs/FRONTEND.md §6).
+    """
+
+    quiz_questions = serializers.SerializerMethodField()
+    open_attempt_id = serializers.SerializerMethodField()
+    completed_attempt_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Quiz
-        fields = ("id", "title", "description", "quiz_questions")
+        fields = (
+            "id", "title", "description", "quiz_questions",
+            "open_attempt_id", "completed_attempt_id",
+        )
+
+    def get_open_attempt_id(self, obj):
+        return self.context.get("open_attempt_id")
+
+    def get_completed_attempt_id(self, obj):
+        return self.context.get("completed_attempt_id")
+
+    def get_quiz_questions(self, obj):
+        rows = list(
+            obj.quizquestion_set.select_related("question")
+            .prefetch_related("question__choices")
+            .order_by("order")
+        )
+        seed = self.context.get("shuffle_seed")
+
+        if seed is not None and obj.shuffle_questions:
+            # A fresh Random per axis, so enabling one shuffle can never perturb the
+            # other's sequence. Seeded by the attempt id alone: the whole quiz's
+            # question order is one permutation for this student.
+            Random(seed).shuffle(rows)
+
+        result = []
+        for index, quiz_question in enumerate(rows):
+            question = QuestionStudentSerializer(quiz_question.question).data
+            if seed is not None and obj.shuffle_choices:
+                choices = list(question["choices"])
+                # Seed folds in the question id, so every question shuffles its
+                # choices independently rather than all sharing one permutation.
+                Random(f"{seed}:{quiz_question.question_id}").shuffle(choices)
+                question = {**question, "choices": choices}
+            result.append(
+                {"id": quiz_question.id, "question": question, "order": index}
+            )
+        return result
 
 
 class QuestionBankSerializer(serializers.ModelSerializer):

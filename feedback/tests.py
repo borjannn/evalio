@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from attempts.models import AnswerResponse, QuizAttempt
-from quizzes.models import Choice, Question, QuestionBank, Quiz, QuizQuestion, Topic
+from quizzes.models import Choice, Question, QuestionBank, Quiz, QuizModule, QuizQuestion, Topic
 
 from .models import FeedbackResult
 from .services import NO_EXPLANATIONS_TEXT, PERFECT_SCORE_TEXT, generate_feedback
@@ -587,3 +587,336 @@ class RunawayProvider:
 
         needing = payload_from_prompt(prompt)["choice_ids_needing_feedback"]
         return [{"choice_id": choice_id, "feedback": "x" * 5000} for choice_id in needing]
+
+
+class HalfGroupingProvider:
+    """Groups only the first question it is asked about and forgets the rest."""
+
+    def generate(self, *, prompt, schema, timeout):
+        from feedback.providers.base import payload_from_prompt
+
+        question_ids = payload_from_prompt(prompt)["question_ids"]
+        return {"Only one": [question_ids[0]]}
+
+
+class UnrequestedQuestionGroupingProvider:
+    """Groups a question id nobody asked about, in a second module."""
+
+    def generate(self, *, prompt, schema, timeout):
+        from feedback.providers.base import payload_from_prompt
+
+        question_ids = payload_from_prompt(prompt)["question_ids"]
+        return {
+            "Fine": question_ids,
+            "Should never be written": [max(question_ids) + 1000],
+        }
+
+
+class RunawayModuleNameProvider:
+    """Returns a module name far longer than MODULE_NAME_MAX_LENGTH."""
+
+    def generate(self, *, prompt, schema, timeout):
+        from feedback.providers.base import payload_from_prompt
+
+        question_ids = payload_from_prompt(prompt)["question_ids"]
+        return {"x" * 500: question_ids}
+
+
+class ModuleGroupingTests(DraftingTestCase):
+    """`generate_modules_for_quiz` / `write_module_grouping` — mirrors `BulkGenerationTests`."""
+
+    def _quiz_question(self, question):
+        return QuizQuestion.objects.get(quiz=self.quiz, question=question)
+
+    def test_writes_modules_only_for_unassigned_questions(self):
+        from feedback.module_grouping import generate_modules_for_quiz
+
+        q1, _, _ = self.add_question("Q1", 0)
+        q2, _, _ = self.add_question("Q2", 1)
+
+        result = generate_modules_for_quiz(self.quiz)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.questions_assigned, 2)
+        self.assertEqual(result.modules_created, 2)  # FakeProvider alternates Group A/Group B
+        names = {
+            self._quiz_question(q1).module.name,
+            self._quiz_question(q2).module.name,
+        }
+        self.assertEqual(names, {"Group A", "Group B"})
+
+    def test_never_overwrites_a_manually_assigned_module(self):
+        from feedback.module_grouping import generate_modules_for_quiz
+
+        q1, _, _ = self.add_question("Q1", 0)
+        q2, _, _ = self.add_question("Q2", 1)
+        mine = QuizModule.objects.create(quiz=self.quiz, name="Mine")
+        qq1 = self._quiz_question(q1)
+        qq1.module = mine
+        qq1.save(update_fields=["module"])
+
+        result = generate_modules_for_quiz(self.quiz)
+
+        self.assertEqual(result.skipped_assigned, 1)
+        self.assertEqual(result.questions_assigned, 1)
+        qq1.refresh_from_db()
+        self.assertEqual(qq1.module_id, mine.id)  # untouched
+        self.assertIsNotNone(self._quiz_question(q2).module_id)  # the gap got filled
+
+    def test_malformed_response_writes_nothing(self):
+        from feedback.module_grouping import generate_modules_for_quiz
+
+        q1, _, _ = self.add_question("Q1", 0)
+        q2, _, _ = self.add_question("Q2", 1)
+
+        with self.settings(AI_FEEDBACK_PROVIDER="feedback.tests.HalfGroupingProvider"):
+            result = generate_modules_for_quiz(self.quiz)
+
+        self.assertFalse(result.ok)
+        self.assertIsNone(self._quiz_question(q1).module_id)
+        self.assertIsNone(self._quiz_question(q2).module_id)
+
+    def test_rejects_an_unrequested_question_id(self):
+        from feedback.module_grouping import generate_modules_for_quiz
+
+        self.add_question("Q1", 0)
+
+        with self.settings(
+            AI_FEEDBACK_PROVIDER="feedback.tests.UnrequestedQuestionGroupingProvider"
+        ):
+            result = generate_modules_for_quiz(self.quiz)
+
+        self.assertFalse(result.ok)
+        self.assertFalse(QuizModule.objects.filter(quiz=self.quiz).exists())
+
+    def test_rejects_an_overlong_module_name(self):
+        from feedback.module_grouping import generate_modules_for_quiz
+
+        self.add_question("Q1", 0)
+
+        with self.settings(AI_FEEDBACK_PROVIDER="feedback.tests.RunawayModuleNameProvider"):
+            result = generate_modules_for_quiz(self.quiz)
+
+        self.assertFalse(result.ok)
+        self.assertFalse(QuizModule.objects.filter(quiz=self.quiz).exists())
+
+    def test_new_name_reuses_an_existing_module_case_insensitively(self):
+        from feedback.module_grouping import write_module_grouping
+
+        q1, _, _ = self.add_question("Q1", 0)
+        existing = QuizModule.objects.create(quiz=self.quiz, name="Group A")
+
+        created, assigned, skipped = write_module_grouping(self.quiz, {q1.id: "group a"})
+
+        self.assertEqual(created, 0)
+        self.assertEqual(assigned, 1)
+        self.assertEqual(QuizModule.objects.filter(quiz=self.quiz).count(), 1)
+        self.assertEqual(self._quiz_question(q1).module_id, existing.id)
+
+    def test_validate_grouping_parses_the_name_to_ids_map(self):
+        from feedback.module_grouping import _validate_grouping
+
+        raw = {"Water Geography": [1, 3], "City Geography": [2]}
+        self.assertEqual(
+            _validate_grouping(raw, [1, 2, 3]),
+            {1: "Water Geography", 2: "City Geography", 3: "Water Geography"},
+        )
+
+    def test_validate_grouping_unwraps_one_layer_of_wrapping(self):
+        """In case a model wraps its map under an extra key anyway, e.g. `{"modules": {...}}`."""
+        from feedback.module_grouping import _validate_grouping
+
+        raw = {"modules": {"Water Geography": [1, 3], "City Geography": [2]}}
+        self.assertEqual(
+            _validate_grouping(raw, [1, 2, 3]),
+            {1: "Water Geography", 2: "City Geography", 3: "Water Geography"},
+        )
+
+    def test_validate_grouping_rejects_a_bare_list(self):
+        """The old array-of-group-objects shape must not silently be accepted."""
+        from feedback.module_grouping import _validate_grouping
+        from feedback.providers import ProviderError
+
+        with self.assertRaises(ProviderError):
+            _validate_grouping([{"module": "X", "question_ids": [1]}], [1])
+
+
+class ModuleFeedbackTests(DraftingTestCase):
+    """Per-module scoring and the concise passage — `feedback/services.py::_module_feedback`."""
+
+    def _assign_module(self, question, name):
+        module, _ = QuizModule.objects.get_or_create(quiz=self.quiz, name=name)
+        quiz_question = QuizQuestion.objects.get(quiz=self.quiz, question=question)
+        quiz_question.module = module
+        quiz_question.save(update_fields=["module"])
+        return module
+
+    def _answer(self, attempt, question, choice):
+        return AnswerResponse.objects.create(
+            attempt=attempt, question=question, selected_choice=choice
+        )
+
+    def test_no_modules_used_gives_an_empty_module_summary(self):
+        question, correct, _ = self.add_question("Q1", 0)
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        self._answer(attempt, question, correct)
+
+        result = generate_feedback(attempt)
+
+        self.assertEqual(result.module_feedback_text, "")
+
+    def test_exactly_80_percent_is_excellent(self):
+        questions = [self.add_question(f"Q{i}", i)[0] for i in range(5)]
+        for question in questions:
+            self._assign_module(question, "Water Geography")
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        for index, question in enumerate(questions):
+            choice = question.choices.get(is_correct=(index < 4))
+            self._answer(attempt, question, choice)
+
+        result = generate_feedback(attempt)
+
+        self.assertEqual(result.module_feedback_text, "You did excellent with Water Geography.")
+
+    def test_exactly_50_percent_is_could_improve(self):
+        questions = [self.add_question(f"Q{i}", i)[0] for i in range(2)]
+        for question in questions:
+            self._assign_module(question, "City Geography")
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        for index, question in enumerate(questions):
+            choice = question.choices.get(is_correct=(index < 1))
+            self._answer(attempt, question, choice)
+
+        result = generate_feedback(attempt)
+
+        self.assertEqual(result.module_feedback_text, "You could improve on City Geography.")
+
+    def test_under_50_percent_is_struggled(self):
+        questions = [self.add_question(f"Q{i}", i)[0] for i in range(3)]
+        for question in questions:
+            self._assign_module(question, "Mountain Geography")
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        for index, question in enumerate(questions):
+            choice = question.choices.get(is_correct=(index < 1))  # 1 of 3 ≈ 33%
+            self._answer(attempt, question, choice)
+
+        result = generate_feedback(attempt)
+
+        self.assertEqual(result.module_feedback_text, "You struggled with Mountain Geography.")
+
+    def test_unanswered_moduled_question_does_not_count_toward_its_module(self):
+        answered, correct, _ = self.add_question("Answered", 0)
+        self.add_question("Unanswered", 1)  # never answered
+        module = self._assign_module(answered, "Water Geography")
+        self._assign_module(Question.objects.get(text="Unanswered"), "Water Geography")
+        self.assertEqual(module.quiz_questions.count(), 2)
+
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        self._answer(attempt, answered, correct)
+
+        result = generate_feedback(attempt)
+
+        # 1/1 answered correct, not 1/2 — the unanswered question has no AnswerResponse
+        # row at all, so it cannot contribute to the module's denominator.
+        self.assertEqual(result.module_feedback_text, "You did excellent with Water Geography.")
+
+    def test_module_summary_is_frozen_against_a_later_module_rename_or_delete(self):
+        question, correct, _ = self.add_question("Q1", 0)
+        module = self._assign_module(question, "Water Geography")
+
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        self._answer(attempt, question, correct)
+        attempt.submitted_at = timezone.now()
+        attempt.save()
+
+        original = generate_feedback(attempt).module_feedback_text
+        self.assertIn("Water Geography", original)
+
+        module.delete()  # QuizQuestion.module is SET_NULL; the snapshot is untouched
+
+        rebuilt = generate_feedback(attempt).module_feedback_text
+        self.assertEqual(rebuilt, original)
+
+    def test_multiple_modules_are_joined_like_the_main_passage(self):
+        q1, c1, _ = self.add_question("Q1", 0)
+        q2, _, wrongs2 = self.add_question("Q2", 1)
+        self._assign_module(q1, "Water Geography")
+        self._assign_module(q2, "City Geography")
+
+        attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        self._answer(attempt, q1, c1)  # 100% -> excellent
+        self._answer(attempt, q2, wrongs2[0])  # 0% -> struggled
+
+        result = generate_feedback(attempt)
+
+        self.assertEqual(
+            result.module_feedback_text,
+            "You did excellent with Water Geography. Also, you struggled with City Geography.",
+        )
+
+
+class DeepSeekNormalizerTests(TestCase):
+    """`_to_entries` normalises the per-choice feedback response's container shapes —
+    the only shape it's used for now that module grouping is a plain object response
+    (`feedback/module_grouping.py::_validate_grouping` handles that one directly).
+    Written generically over id_key/value_key regardless, so these still exercise it
+    that way rather than hardcoding `choice_id`/`feedback` into the function itself."""
+
+    def test_bare_list_is_returned_as_is(self):
+        from feedback.providers.deepseek import _to_entries
+
+        raw = [{"choice_id": 1, "feedback": "Because reasons."}]
+        self.assertEqual(
+            _to_entries(raw, id_key="choice_id", value_key="feedback"), raw
+        )
+
+    def test_single_entry_object_is_wrapped_in_a_list(self):
+        from feedback.providers.deepseek import _to_entries
+
+        raw = {"choice_id": 1, "feedback": "Because reasons."}
+        self.assertEqual(
+            _to_entries(raw, id_key="choice_id", value_key="feedback"), [raw]
+        )
+
+    def test_id_keyed_map_is_flattened_using_the_given_field_names(self):
+        from feedback.providers.deepseek import _to_entries
+
+        raw = {"1": "Because reasons.", "2": "Because other reasons."}
+        entries = _to_entries(raw, id_key="choice_id", value_key="feedback")
+        self.assertEqual(
+            sorted(entries, key=lambda e: e["choice_id"]),
+            [
+                {"choice_id": 1, "feedback": "Because reasons."},
+                {"choice_id": 2, "feedback": "Because other reasons."},
+            ],
+        )
+
+    def test_an_id_keyed_map_wrapped_under_a_single_key_is_unwrapped(self):
+        """The FINKI Qwen model's actual shape: `{"feedback": {"1020": "text", ...}}` —
+        the id-keyed map one level deeper than DeepSeek's bare `{"1020": "text", ...}`."""
+        from feedback.providers.deepseek import _to_entries
+
+        raw = {"feedback": {"1227": "Because reasons.", "1229": "Because other reasons."}}
+        entries = _to_entries(raw, id_key="choice_id", value_key="feedback")
+        self.assertEqual(
+            sorted(entries, key=lambda e: e["choice_id"]),
+            [
+                {"choice_id": 1227, "feedback": "Because reasons."},
+                {"choice_id": 1229, "feedback": "Because other reasons."},
+            ],
+        )
+
+    def test_items_wrapper_is_unwrapped(self):
+        from feedback.providers.deepseek import _to_entries
+
+        raw = {"items": [{"choice_id": 1, "feedback": "Because reasons."}]}
+        self.assertEqual(
+            _to_entries(raw, id_key="choice_id", value_key="feedback"), raw["items"]
+        )
+
+    def test_still_handles_the_original_choice_feedback_shape(self):
+        from feedback.providers.deepseek import _to_entries
+
+        raw = {"5": "Explanation."}
+        entries = _to_entries(raw, id_key="choice_id", value_key="feedback")
+        self.assertEqual(entries, [{"choice_id": 5, "feedback": "Explanation."}])

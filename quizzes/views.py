@@ -397,6 +397,46 @@ class QuizViewSet(viewsets.ModelViewSet):
             ).order_by("-created_at")
         return queryset
 
+    def get_serializer_context(self):
+        # `QuizDetailStudentSerializer` seeds its per-student question/choice shuffle
+        # from this. None whenever there is no open attempt (or the quiz has neither
+        # shuffle flag on), which the serializer reads as "use the canonical order".
+        context = super().get_serializer_context()
+        context["shuffle_seed"] = getattr(self, "_shuffle_seed", None)
+        context["open_attempt_id"] = getattr(self, "_open_attempt_id", None)
+        context["completed_attempt_id"] = getattr(self, "_completed_attempt_id", None)
+        return context
+
+    def retrieve(self, request, *args, **kwargs):
+        """Resolve this student's attempt state before serializing, for students only.
+
+        The *open* attempt id doubles as the shuffle seed — there is at most one,
+        enforced in `StartAttemptView` — so the order a student sees is fixed for the
+        whole duration of that attempt and cannot be re-rolled by refreshing. The
+        seed is only applied when a shuffle is actually on, but both ids are always
+        resolved so the intro screen can mirror the list card's CTA (Resume / View
+        feedback) rather than always offering Start. Ids only, no score.
+        """
+        if request.user.is_student:
+            instance = self.get_object()
+            from attempts.models import QuizAttempt
+
+            attempts = QuizAttempt.objects.filter(student=request.user, quiz=instance)
+            self._open_attempt_id = (
+                attempts.filter(submitted_at__isnull=True)
+                .values_list("id", flat=True)
+                .first()
+            )
+            self._completed_attempt_id = (
+                attempts.filter(submitted_at__isnull=False)
+                .order_by("-started_at")
+                .values_list("id", flat=True)
+                .first()
+            )
+            if instance.shuffle_questions or instance.shuffle_choices:
+                self._shuffle_seed = self._open_attempt_id
+        return super().retrieve(request, *args, **kwargs)
+
     def get_serializer_class(self):
         if self.action == "retrieve" and self.request.user.is_student:
             return QuizDetailStudentSerializer
@@ -511,6 +551,97 @@ class QuizViewSet(viewsets.ModelViewSet):
                 "can_publish_as_ai": not gaps,
                 "planned_call_count": planned_call_count(quiz),
                 "ai_enabled": settings.AI_FEEDBACK_ENABLED,
+            }
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="set-question-module",
+        permission_classes=[IsTeacher, IsOwner],
+    )
+    def set_question_module(self, request, pk=None):
+        """POST /api/quizzes/{id}/set-question-module/ — assign or clear one question's module.
+
+        Body: `{"quiz_question_id": int, "module": int|null, "new_module_name": str|null}`.
+        Exactly one of `module` (an existing module id, must belong to this quiz — 404 if
+        not, the same "cross-scope id is invisible" rule `import_questions` applies to bank
+        ids) or `new_module_name` (matched case-insensitively against this quiz's existing
+        modules before a new one is created) may be given; neither clears the assignment.
+        """
+        quiz = self.get_object()
+        quiz_question = quiz.quizquestion_set.filter(
+            id=request.data.get("quiz_question_id")
+        ).first()
+        if quiz_question is None:
+            return Response(
+                {"detail": "That question is not in this quiz."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        raw_module_id = request.data.get("module")
+        new_module_name = (request.data.get("new_module_name") or "").strip()
+        if raw_module_id is not None and new_module_name:
+            return Response(
+                {"detail": "Provide 'module' or 'new_module_name', not both."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if raw_module_id is not None:
+            module = quiz.modules.filter(id=raw_module_id).first()
+            if module is None:
+                return Response(
+                    {"detail": "That module is not in this quiz."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            quiz_question.module = module
+        elif new_module_name:
+            module = quiz.modules.filter(name__iexact=new_module_name).first()
+            if module is None:
+                module = quiz.modules.create(name=new_module_name)
+            quiz_question.module = module
+        else:
+            quiz_question.module = None
+
+        quiz_question.save(update_fields=["module"])
+        return Response(
+            {"quiz_question_id": quiz_question.id, "module": quiz_question.module_id}
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="generate-modules",
+        permission_classes=[IsTeacher, IsOwner],
+    )
+    def generate_modules(self, request, pk=None):
+        """POST /api/quizzes/{id}/generate-modules/ — group every question in one AI call.
+
+        One call for the whole quiz rather than one per question, so unlike
+        `generate_feedback` there is no per-question failure list and nothing to poll
+        progress on — the response comes back synchronously. Only questions with no
+        module yet are written; a teacher's manual assignment is never overwritten.
+        """
+        from feedback.module_grouping import generate_modules_for_quiz
+        from feedback.providers import ProviderUnavailable
+
+        quiz = self.get_object()
+        try:
+            result = generate_modules_for_quiz(quiz)
+        except ProviderUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        if not result.ok:
+            return Response(
+                {"detail": "Could not group this quiz's questions.", "reason": result.error},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                "modules_created": result.modules_created,
+                "questions_assigned": result.questions_assigned,
+                "skipped_assigned": result.skipped_assigned,
             }
         )
 

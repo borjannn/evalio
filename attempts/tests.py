@@ -3,7 +3,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from classes.models import QuizAssignment
-from quizzes.models import Choice, Question, QuestionBank, Quiz, QuizQuestion, Topic
+from quizzes.models import Choice, Question, QuestionBank, Quiz, QuizModule, QuizQuestion, Topic
 
 from .models import AnswerResponse, QuizAttempt
 
@@ -375,3 +375,54 @@ class AIFeedbackSnapshotTests(AttemptLifecycleTestCase):
 
         answer = AnswerResponse.objects.get(attempt_id=attempt_id)
         self.assertEqual(answer.choice_ai_feedback_text, "")
+
+
+class ModuleSnapshotTests(AttemptLifecycleTestCase):
+    """`AnswerResponse.module_name` — snapshotted the same way choice_text/choice_feedback_text are."""
+
+    def setUp(self):
+        super().setUp()
+        self.assign()
+        self.attempt = QuizAttempt.objects.create(student=self.student, quiz=self.quiz)
+        self.client.force_authenticate(self.student)
+
+    def _answer(self, choice):
+        self.client.post(
+            f"/api/attempts/{self.attempt.id}/answer/",
+            {"question_id": self.question.id, "choice_id": choice.id},
+            format="json",
+        )
+
+    def test_answering_a_moduled_question_snapshots_the_name(self):
+        module = QuizModule.objects.create(quiz=self.quiz, name="Water Geography")
+        quiz_question = QuizQuestion.objects.get(quiz=self.quiz, question=self.question)
+        quiz_question.module = module
+        quiz_question.save(update_fields=["module"])
+
+        self._answer(self.right)
+
+        answer = AnswerResponse.objects.get(attempt=self.attempt)
+        self.assertEqual(answer.module_name, "Water Geography")
+
+    def test_answering_an_unmoduled_question_leaves_the_snapshot_blank(self):
+        self._answer(self.right)
+
+        answer = AnswerResponse.objects.get(attempt=self.attempt)
+        self.assertEqual(answer.module_name, "")
+
+    def test_reassigning_the_module_after_submission_does_not_change_the_snapshot(self):
+        module = QuizModule.objects.create(quiz=self.quiz, name="Water Geography")
+        quiz_question = QuizQuestion.objects.get(quiz=self.quiz, question=self.question)
+        quiz_question.module = module
+        quiz_question.save(update_fields=["module"])
+
+        self._answer(self.right)
+        self.attempt.submitted_at = timezone.now()
+        self.attempt.save()
+
+        other_module = QuizModule.objects.create(quiz=self.quiz, name="City Geography")
+        quiz_question.module = other_module
+        quiz_question.save(update_fields=["module"])
+
+        answer = AnswerResponse.objects.get(attempt=self.attempt)
+        self.assertEqual(answer.module_name, "Water Geography")
